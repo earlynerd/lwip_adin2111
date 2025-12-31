@@ -36,6 +36,7 @@ adi_eth_Result_e sfe_spe_advanced::begin(uint8_t* retries, uint8_t cs_pin)
         }
     }
     *retries += count-1;
+    
     return result;
 }
 

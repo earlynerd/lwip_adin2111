@@ -51,5 +51,6 @@ private:
     SPIClass& _spi;
     SPISettings _settings = {25000000, MSBFIRST, SPI_MODE0}; 
     uint8_t _mac[6];
+    bool printResultCounters(uint32_t* counters);
     void printPhyState(adi_phy_State_e);
 };

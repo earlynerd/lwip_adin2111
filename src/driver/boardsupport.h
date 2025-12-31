@@ -108,6 +108,7 @@ extern "C"
   uint32_t BSP_ConfigSystemCS(uint8_t chip_select);
   uint32_t BSP_SysNow(void);
   uint32_t BSP_RegisterIRQCallback(ADI_CB const *intCallback, void *hDevice);
+  void BSP_IRQCallback();
   void BSP_DisableIRQ(void);
   void BSP_EnableIRQ(void);
   uint32_t BSP_SetPinMDC(bool set);

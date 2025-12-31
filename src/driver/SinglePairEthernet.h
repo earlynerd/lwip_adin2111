@@ -58,6 +58,7 @@ private:
 
     volatile adi_eth_LinkStatus_e    linkStatus;
     adin2111_DeviceHandle_t hdev;
+    
 
 public:
     bool    begin                   (uint8_t* retries, uint8_t * mac, uint8_t cs_pin);
@@ -93,6 +94,9 @@ public:
     void                txCallback              (void *pCBParam, uint32_t Event, void *pArg);
     void                rxCallback              (void *pCBParam, uint32_t Event, void *pArg);
     void                linkCallback            (void *pCBParam, uint32_t Event, void *pArg);
+    volatile uint32_t txResultCounters[36] = {0};
+    volatile uint32_t rxResultCounters[36] = {0};
+    volatile uint32_t initResultCounters[36] = {0};
     adin2111_DeviceHandle_t getDevice();
 };
 

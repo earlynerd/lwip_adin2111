@@ -43,7 +43,7 @@ static ADI_CB gpfGPIOIntCallback = NULL;
 static void *gpGPIOIntCBParam = NULL;
 
 static uint8_t status_led_pin = LED_BUILTIN;
-static uint8_t interrupt_pin = DEFAULT_ETH_INT_Pin;
+static uint8_t interrupt_pin = 255;
 static uint8_t reset_pin = DEFAULT_ETH_RESET_Pin;
 static uint8_t chip_select_pin = DEFAULT_ETH_SPI_CS_Pin;
 
@@ -91,7 +91,7 @@ uint32_t BSP_RegisterIRQCallback(ADI_CB const *intCallback, void *hDevice)
     gpfGPIOIntCallback = (ADI_CB)intCallback;
     gpGPIOIntCBParam = hDevice;
 
-    attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
+    //attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
     return 0;
 }
 /*
@@ -129,7 +129,7 @@ void BSP_disableInterrupts(void)
 
 void BSP_enableInterrupts(void)
 {
-    attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
+    //attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
     //if(!digitalRead(interrupt_pin)) BSP_IRQCallback();      //if int pin has gone low while we werent looking for an edge, call it now manually
     //interrupts();
 }
