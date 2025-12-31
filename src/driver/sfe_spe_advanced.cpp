@@ -9,6 +9,11 @@
 
 const int ADIN2111_INIT_ITER = 5;
 
+adin2111_DeviceHandle_t sfe_spe_advanced::getDevice()
+{
+    return &dev;
+}
+
 adi_eth_Result_e sfe_spe_advanced::begin(uint8_t* retries, uint8_t cs_pin)
 {
     adi_eth_Result_e result;

@@ -20,7 +20,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-//#define SPI_OA_EN
+
 
 #define NET_SPI_CFG0_PIN 9
 #define NET_SPI_CFG1_PIN 8
@@ -49,9 +49,51 @@ static uint8_t chip_select_pin = DEFAULT_ETH_SPI_CS_Pin;
 
 static SPIClass *SPI_instance = &SPI;
 
-void SPI_TxRxCpltCallback(void);
-void BSP_IRQCallback(void);
+#if defined(ARDUINO_ARCH_MBED)
+// MBED will not allow SPI calls during ISR, which the callbacks may do
+// So instead of directly calling in this function we start a thread that will call the callback after signalled to by this function
+int num_int = 0;
+void BSP_IRQCallback()
+{
+    // Signal to thread that this function was called
+    updates.release();
+}
 
+void thread_fn(void)
+{
+    while (1)
+    {
+        // Once acquired, the IRQCallback function has run
+        updates.acquire();
+
+        if (gpfGPIOIntCallback)
+        {
+            (*gpfGPIOIntCallback)(gpGPIOIntCBParam, 0, NULL);
+        }
+    }
+}
+#else
+// Outside of mbed cores, we just call the callback within the ISR
+void BSP_IRQCallback()
+{
+    if (gpfGPIOIntCallback)
+    {
+        (*gpfGPIOIntCallback)(gpGPIOIntCBParam, 0, NULL);
+    }
+}
+#endif
+//void SPI_TxRxCpltCallback(void);
+//void BSP_IRQCallback(void);
+// Register the callback for the interrupt pin, in the driver the following macro is used:
+// extern uint32_t HAL_INT_N_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
+uint32_t BSP_RegisterIRQCallback(ADI_CB const *intCallback, void *hDevice)
+{
+    gpfGPIOIntCallback = (ADI_CB)intCallback;
+    gpGPIOIntCBParam = hDevice;
+
+    attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
+    return 0;
+}
 /*
  * Functions that are part of the driver, that do nothing in the arduino port
  */
@@ -88,7 +130,7 @@ void BSP_disableInterrupts(void)
 void BSP_enableInterrupts(void)
 {
     attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
-    if(!digitalRead(interrupt_pin)) BSP_IRQCallback();      //if int pin has gone low while we werent looking for an edge, call it now manually
+    //if(!digitalRead(interrupt_pin)) BSP_IRQCallback();      //if int pin has gone low while we werent looking for an edge, call it now manually
     //interrupts();
 }
 
@@ -119,7 +161,7 @@ void BSP_delayMs(uint32_t delayms)
  */
 void BSP_HWReset(bool set)
 {
-    uint32_t buf;
+    uint32_t buf=0;
     digitalWrite(reset_pin, LOW);
     pinMode(NET_SPI_CFG0_PIN, OUTPUT);
     pinMode(NET_SPI_CFG1_PIN, OUTPUT);
@@ -180,6 +222,14 @@ void BSP_LedToggleAll(void)
     bspLedSet(status_led_pin, HIGH);
 }
 
+// Function called on SPI transaction completion
+void SPI_TxRxCpltCallback(void)
+{
+    // delayMicroseconds(1);
+    bspLedSet(chip_select_pin, HIGH);
+    SPI_instance->endTransaction();
+    (*gpfSpiCallback)(gpSpiCBParam, 0, NULL);
+}
 uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_t nbBytes, bool useDma)
 {
     // Validate parameters
@@ -222,14 +272,7 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
     return 0;
 }
 
-// Function called on SPI transaction completion
-void SPI_TxRxCpltCallback(void)
-{
-    // delayMicroseconds(1);
-    bspLedSet(chip_select_pin, HIGH);
-    SPI_instance->endTransaction();
-    (*gpfSpiCallback)(gpSpiCBParam, 0, NULL);
-}
+
 
 // Register the SPI callback, in the driver the following macro is used:
 // extern uint32_t HAL_SPI_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
@@ -255,50 +298,9 @@ void setSPI2Cs(bool set)
     }
 }
 
-// Register the callback for the interrupt pin, in the driver the following macro is used:
-// extern uint32_t HAL_INT_N_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
-uint32_t BSP_RegisterIRQCallback(ADI_CB const *intCallback, void *hDevice)
-{
-    gpfGPIOIntCallback = (ADI_CB)intCallback;
-    gpGPIOIntCBParam = hDevice;
 
-    attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
-    return 0;
-}
 
-#if defined(ARDUINO_ARCH_MBED)
-// MBED will not allow SPI calls during ISR, which the callbacks may do
-// So instead of directly calling in this function we start a thread that will call the callback after signalled to by this function
-int num_int = 0;
-void BSP_IRQCallback()
-{
-    // Signal to thread that this function was called
-    updates.release();
-}
 
-void thread_fn(void)
-{
-    while (1)
-    {
-        // Once acquired, the IRQCallback function has run
-        updates.acquire();
-
-        if (gpfGPIOIntCallback)
-        {
-            (*gpfGPIOIntCallback)(gpGPIOIntCBParam, 0, NULL);
-        }
-    }
-}
-#else
-// Outside of mbed cores, we just call the callback within the ISR
-void BSP_IRQCallback()
-{
-    if (gpfGPIOIntCallback)
-    {
-        (*gpfGPIOIntCallback)(gpGPIOIntCBParam, 0, NULL);
-    }
-}
-#endif
 
 uint32_t BSP_SysNow(void)
 {
@@ -313,12 +315,12 @@ uint32_t BSP_InitSystem(void)
 #endif
     SPI_instance->begin();
     pinMode(status_led_pin, OUTPUT_12MA);
-    pinMode(interrupt_pin, INPUT);
+    pinMode(interrupt_pin, INPUT_PULLUP);
     digitalWrite(reset_pin, HIGH);
     pinMode(reset_pin, OUTPUT_12MA);
-    pinMode(chip_select_pin, OUTPUT_12MA);
+    pinMode(chip_select_pin, OUTPUT);
     digitalWrite(chip_select_pin, HIGH);
-    
+    pinMode(chip_select_pin, OUTPUT_12MA);
     return 0;
 }
 

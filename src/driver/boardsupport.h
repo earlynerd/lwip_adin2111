@@ -16,7 +16,6 @@
 
 #ifndef BOARDSUPPORT_H
 #define BOARDSUPPORT_H
-#define ARDUINO_RASPBERRY_PI_PICO
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>

@@ -8,6 +8,9 @@
 #define __Sparkfun_SinglePairEth__
 
 #include "sfe_spe_advanced.h"
+#include "../utility/PacketPool.h"
+// Instantiate the pool
+
 //Default MAC addresses used in Analog Devices examples
 #define MAC_ADDR_0_0        (0x00)
 #define MAC_ADDR_0_1        (0xE0)
@@ -38,43 +41,47 @@ class SinglePairEthernet : public sfe_spe_advanced
 {
 private:
     
-
-    uint8_t rxBuf[SPE_NUM_BUFS][SPE_MAX_BUF_FRAME_SIZE] HAL_ALIGNED_ATTRIBUTE(4);
-    uint8_t txBuf[SPE_NUM_BUFS][SPE_MAX_BUF_FRAME_SIZE] HAL_ALIGNED_ATTRIBUTE(4);
+    PacketPool rxPool;
+    TxPacketPool txPool;
+    //uint8_t rxBuf[SPE_NUM_BUFS][SPE_MAX_BUF_FRAME_SIZE] HAL_ALIGNED_ATTRIBUTE(4);
+    //uint8_t txBuf[SPE_NUM_BUFS][SPE_MAX_BUF_FRAME_SIZE] HAL_ALIGNED_ATTRIBUTE(4);
     adi_eth_BufDesc_t rxBufDesc[SPE_NUM_BUFS];
     adi_eth_BufDesc_t txBufDesc[SPE_NUM_BUFS];
     bool txBufAvailable[SPE_NUM_BUFS];
-    bool rxBufAvailable[SPE_NUM_BUFS];
-    uint32_t txBufIdx;
-    uint32_t rxBufIdx;
-    bool rxSinceLastCheck;
+    //bool rxBufAvailable[SPE_NUM_BUFS];
+    //uint32_t txBufIdx;
+    //uint32_t rxBufIdx;
+    //bool rxSinceLastCheck;
 
     uint8_t macAddr[SPE_MAC_SIZE] = {MAC_ADDR_0_0, MAC_ADDR_0_1, MAC_ADDR_0_2, MAC_ADDR_0_3, MAC_ADDR_0_4, MAC_ADDR_0_5};
-    uint8_t destMacAddr[SPE_MAC_SIZE] = {MAC_ADDR_1_0, MAC_ADDR_1_1, MAC_ADDR_1_2, MAC_ADDR_1_3, MAC_ADDR_1_4, MAC_ADDR_1_5};
+    //uint8_t destMacAddr[SPE_MAC_SIZE] = {MAC_ADDR_1_0, MAC_ADDR_1_1, MAC_ADDR_1_2, MAC_ADDR_1_3, MAC_ADDR_1_4, MAC_ADDR_1_5};
 
     volatile adi_eth_LinkStatus_e    linkStatus;
-
+    adin2111_DeviceHandle_t hdev;
 
 public:
-    bool    begin                   (uint8_t* retries, uint8_t * mac, uint8_t cs_pin = DEFAULT_ETH_SPI_CS_Pin);
-    bool    begin                   (uint8_t* retries, uint8_t * mac, uint8_t status, uint8_t interrupt, uint8_t reset, uint8_t chip_select);
+    bool    begin                   (uint8_t* retries, uint8_t * mac, uint8_t cs_pin);
+    ///bool    begin                   (uint8_t* retries, uint8_t * mac, uint8_t status = 26, uint8_t interrupt = DEFAULT_ETH_INT_Pin, uint8_t reset = DEFAULT_ETH_RESET_Pin, uint8_t chip_select = DEFAULT_ETH_SPI_CS_Pin);
     
     bool    sendData                (adin2111_TxPort_e port, uint8_t *data, int dataLen, uint8_t *destMac);
     bool    sendData                (adin2111_TxPort_e port, uint8_t *data, int dataLen);
+    uint16_t    sendFrame             ( uint8_t *data, int dataLen);
     int     getRxData               (uint8_t *data, int dataLen, uint8_t *senderMac);
     bool    getRxAvailable          ();
+    void discardFrame();
+    uint16_t     getRxLength             ();
 
     void setMac                     (uint8_t * mac);
     void getMac                     (uint8_t * mac);
     void setDestMac                 (uint8_t * mac);
     bool indenticalMacs             (uint8_t * mac1, uint8_t * mac2);
 
-    void setRxCallback              (void (*cbFunc)(uint8_t *, int, uint8_t*));
+    void setRxCallback              (void (*cbFunc)(adi_eth_BufDesc_t *));
     void setLinkCallback            (void (*cbFunc)(bool));
     bool getLinkStatus              (void);
     adi_eth_Result_e    enableDefaultBehavior   (); 
     //User callbacks
-    void (*userRxCallback)(uint8_t * data, int dataLen, uint8_t *senderMac);
+    void (*userRxCallback)(adi_eth_BufDesc_t *);
     void (*userLinkCallback)(bool connected);
     
     //static functions available to pass to underlying C driver, will regain context and call appropriate member function 
@@ -86,6 +93,7 @@ public:
     void                txCallback              (void *pCBParam, uint32_t Event, void *pArg);
     void                rxCallback              (void *pCBParam, uint32_t Event, void *pArg);
     void                linkCallback            (void *pCBParam, uint32_t Event, void *pArg);
+    adin2111_DeviceHandle_t getDevice();
 };
 
 #endif

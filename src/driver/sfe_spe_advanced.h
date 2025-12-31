@@ -6,17 +6,12 @@
 */
 #ifndef __Sparkfun_SinglePairEth_Raw__
 #define __Sparkfun_SinglePairEth_Raw__
-
+#include <Arduino.h>
 #include <SPI.h>
-//#include "adin1110.h"
 #include "adin2111.h"
-#if defined(ARDUINO) && ARDUINO >= 100
-#include "Arduino.h"
-#else
-#include "WProgram.h"
-#endif
-//#define SPI_OA_EN
-#define SPI_CRC_EN
+
+
+
 
 class sfe_spe_advanced
 {
@@ -31,6 +26,7 @@ private:
 
 public:
     //Device status
+    adin2111_DeviceHandle_t getDevice();
     adi_eth_Result_e    begin                   (uint8_t* retries, uint8_t cs_pin = DEFAULT_ETH_SPI_CS_Pin);
     adi_eth_Result_e    begin                   (uint8_t* retries, uint8_t status, uint8_t interrupt, uint8_t reset, uint8_t chip_select);
     adi_eth_Result_e    init                    (adin2111_DriverConfig_t *pCfg);

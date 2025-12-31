@@ -21,8 +21,6 @@
 #ifndef ADI_PHY_H
 #define ADI_PHY_H
 
-//#define ADIN1110
-//#define ADIN2111
 
 #include <stdint.h>
 #include <stdbool.h>
