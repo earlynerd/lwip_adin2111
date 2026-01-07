@@ -15,7 +15,7 @@
 */
 
 #include "adi_phy.h"
-#include "hal.h"
+#include "../driver/hal.h"
 
 static adi_eth_Result_e         PHY_Init                    (adi_phy_Device_t **hPhyDevice, adi_phy_DriverConfig_t *cfg, void *adinDevice, HAL_ReadFn_t readFn, HAL_WriteFn_t writeFn);
 static adi_eth_Result_e         PHY_UnInit                  (adi_phy_Device_t *hDevice);

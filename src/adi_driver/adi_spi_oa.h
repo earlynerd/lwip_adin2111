@@ -19,7 +19,7 @@
 #define ADI_SPI_OA_H
 
 #include "adi_mac.h"
-#include "hal.h"
+#include "../driver/hal.h"
 #include <math.h>
 
 #ifdef __cplusplus

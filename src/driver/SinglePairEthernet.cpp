@@ -8,6 +8,8 @@
 #include "SinglePairEthernet.h"
 #include "boardsupport.h"
 
+const int ADIN2111_INIT_ITER = 5;
+
 // The next three function are static member functions. Static member functions are needed to get a function
 // pointer that we can shove into the C function that attaches the interrupt in the driver.
 void SinglePairEthernet::linkCallback_C_Compatible(void *pCBParam, uint32_t Event, void *pArg)
@@ -44,7 +46,7 @@ void SinglePairEthernet::txCallback(void *pCBParam, uint32_t Event, void *pArg)
     adi_eth_BufDesc_t *pTxBufDesc = (adi_eth_BufDesc_t *)pArg;
 
     int idx = pTxBufDesc - &txBufDesc[0];
-    // Serial.printf("[ADIN] TX Callback, release pbuf %d\r\n", idx);
+
     // release memory in the packet pool
     if (pTxBufDesc->pBuf)
     {
@@ -64,7 +66,7 @@ void SinglePairEthernet::rxCallback(void *pCBParam, uint32_t Event, void *pArg)
     // rxSinceLastCheck = true;
     uint8_t *filledBuffer = pRxBufDesc->pBuf;
     uint32_t receivedLen = pRxBufDesc->trxSize;
-    // Serial.printf("[ADIN] RX Callback, len: %d\r\n", receivedLen);
+
     //  2. Try to get a NEW buffer from our pool
     uint8_t *freshBuffer = rxPool.getFreeBuffer();
 
@@ -74,7 +76,7 @@ void SinglePairEthernet::rxCallback(void *pCBParam, uint32_t Event, void *pArg)
 
         // A. Queue the filled buffer for lwIP to read later
         rxPool.queueRxPacket(filledBuffer, receivedLen);
-        // Serial.println("packet queued");
+
         //  B. Update the descriptor with the fresh buffer
         //  When this callback returns (or you re-submit), the hardware
         //  will use this new memory location for the next packet.
@@ -84,7 +86,7 @@ void SinglePairEthernet::rxCallback(void *pCBParam, uint32_t Event, void *pArg)
     else
     {
         // FAILURE: Pool is empty (lwIP is too slow / storm of packets)
-        // Serial.println("Fail to get fresh rx buffer.");
+
         // We cannot save this packet. We leave pDesc->pBuf pointing
         // to the OLD buffer. The hardware will effectively overwrite
         // this unread packet with the next one.
@@ -92,7 +94,7 @@ void SinglePairEthernet::rxCallback(void *pCBParam, uint32_t Event, void *pArg)
         // Optional: Increment a "dropped packet" counter
     }
     adi_eth_Result_e res = submitRxBuffer(pRxBufDesc);
-    if(res != ADI_ETH_SUCCESS)
+    if (res != ADI_ETH_SUCCESS)
     {
         rxResultCounters[(int)res]++;
     }
@@ -127,17 +129,43 @@ void SinglePairEthernet::linkCallback(void *pCBParam, uint32_t Event, void *pArg
     }
 }
 
-bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs_pin)
+void SinglePairEthernet::setSPI(SPIClass &spi)
 {
+    BSP_SetSPIClass(&spi);
+}
 
+bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs, uint8_t intr, uint8_t reset, uint8_t cfg0, uint8_t cfg1)
+{
     adi_eth_Result_e result = ADI_ETH_SUCCESS;
-    // txBufIdx =  0;
     if (mac)
     {
         memcpy(macAddr, mac, 6);
-        // setMac(mac);
     }
-    result = sfe_spe_advanced::begin(retries, cs_pin);
+    // Using LED_BUILTIN as default status pin since it's not passed in
+    // result = sfe_spe_advanced::begin(retries, LED_BUILTIN, intr, reset, cs);
+
+    BSP_SetCfgPins(cfg0, cfg1);
+
+    BSP_ConfigSystem(255, 255, reset, cs);
+    if (BSP_InitSystem())
+    {
+        return false;
+    }
+    uint8_t count = 0;
+    BSP_HWReset(true);
+    while (digitalRead(intr))
+        ;
+    for (uint32_t i = 0; i < ADIN2111_INIT_ITER; i++)
+    {
+        result = init(&drvConfig);
+        count++;
+        if (result == ADI_ETH_SUCCESS)
+        {
+            break;
+        }
+        delay(100);
+    }
+    *retries += count - 1;
 
     setUserContext((void *)this);
     if (result != ADI_ETH_SUCCESS)
@@ -148,7 +176,51 @@ bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs_pin)
         result = enableDefaultBehavior();
     if (result != ADI_ETH_SUCCESS)
         initResultCounters[(int)result]++;
-    hdev = sfe_spe_advanced::getDevice();
+    hdev = getDevice();
+    return (result == ADI_ETH_SUCCESS);
+}
+
+bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs_pin)
+{
+
+    adi_eth_Result_e result = ADI_ETH_SUCCESS;
+    // txBufIdx =  0;
+    if (mac)
+    {
+        memcpy(macAddr, mac, 6);
+        // setMac(mac);
+    }
+
+    BSP_ConfigSystemCS(cs_pin);
+    if (BSP_InitSystem())
+    {
+        return false;
+    }
+
+    BSP_HWReset(true);
+
+    uint8_t count = 0;
+    for (uint32_t i = 0; i < ADIN2111_INIT_ITER; i++)
+    {
+        result = init(&drvConfig);
+        count++;
+        if (result == ADI_ETH_SUCCESS)
+        {
+            break;
+        }
+    }
+    *retries += count - 1;
+
+    setUserContext((void *)this);
+    if (result != ADI_ETH_SUCCESS)
+    {
+        initResultCounters[(int)result]++;
+    }
+    else
+        result = enableDefaultBehavior();
+    if (result != ADI_ETH_SUCCESS)
+        initResultCounters[(int)result]++;
+    hdev = getDevice();
     return (result == ADI_ETH_SUCCESS);
 }
 /*
@@ -225,8 +297,6 @@ adi_eth_Result_e SinglePairEthernet::enableDefaultBehavior()
         }
     }
 
-
-
     for (uint32_t i = 0; i < SPE_NUM_BUFS; i++)
     {
         if (result != ADI_ETH_SUCCESS)
@@ -242,7 +312,6 @@ adi_eth_Result_e SinglePairEthernet::enableDefaultBehavior()
         // rxBufAvailable[i] = false;
         rxBufDesc[i].pBuf = buf;
         rxBufDesc[i].bufSize = RX_PACKET_SIZE;
-        ;
         rxBufDesc[i].cbFunc = rxCallback_C_Compatible;
 
         result = submitRxBuffer(&rxBufDesc[i]);
@@ -253,12 +322,12 @@ adi_eth_Result_e SinglePairEthernet::enableDefaultBehavior()
         }
     }
 
-    adin2111_PhyWrite(hDevice, ADIN2111_PORT_1, ADDR_LED_POLARITY, 0x01);
-    adin2111_PhyWrite(hDevice, ADIN2111_PORT_2, ADDR_LED_POLARITY, 0x01);
-    adin2111_PhyWrite(hDevice, ADIN2111_PORT_1, ADDR_LED_CNTRL, 0x8E84);
-    adin2111_PhyWrite(hDevice, ADIN2111_PORT_2, ADDR_LED_CNTRL, 0x8E84);
-    adin2111_PhyWrite(hDevice, ADIN2111_PORT_1, ADDR_LED0_BLINK_TIME_CNTRL, 0x0303);
-    adin2111_PhyWrite(hDevice, ADIN2111_PORT_2, ADDR_LED0_BLINK_TIME_CNTRL, 0x0303);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_POLARITY, 0x01);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_POLARITY, 0x01);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_CNTRL, 0x8E84);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_CNTRL, 0x8E84);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED0_BLINK_TIME_CNTRL, 0x0303);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED0_BLINK_TIME_CNTRL, 0x0303);
 
     uint16_t dat;
     // adin2111_PhyRead(hDevice, ADIN2111_PORT_1, ADDR_AN_ADV_ABILITY_H, &dat);
@@ -276,7 +345,7 @@ adi_eth_Result_e SinglePairEthernet::enableDefaultBehavior()
     //     result = syncConfig();
     //     if(result) Serial.println("fail, sync config 1");
     // }
-    // setCutThroughMode(false, false, true);
+    setCutThroughMode(false, false, false);
     if (result == ADI_ETH_SUCCESS)
     {
         result = enable();
@@ -463,7 +532,6 @@ uint16_t SinglePairEthernet::getRxLength()
 {
     BSP_IRQCallback();
     uint16_t sz = rxPool.peekNextPacketSize();
-    // Serial.printf("[ADIN] next packet size: %d\r\n", sz);
 
     // bool rxDataAvailable = false;
     // uint32_t idx = rxBufIdx;                    //dont modify, we are peeking
@@ -522,4 +590,295 @@ bool SinglePairEthernet::getLinkStatus(void)
     phyDriverEntry.GetLinkStatus(phy1, &stat1);
     phyDriverEntry.GetLinkStatus(phy2, &stat2);
     return ((stat1 == ADI_PHY_LINK_STATUS_UP) || ((stat2 == ADI_PHY_LINK_STATUS_UP)));
+}
+
+bool SinglePairEthernet::isLinkUp(void)
+{
+    return getLinkStatus();
+}
+
+// Wrapper methods merged from sfe_spe_advanced
+
+adi_eth_Result_e SinglePairEthernet::init(adin2111_DriverConfig_t *pCfg)
+{
+    return adin2111_Init(hdev, pCfg);
+}
+
+adi_eth_Result_e SinglePairEthernet::unInit()
+{
+    return adin2111_UnInit(hdev);
+}
+
+adi_eth_Result_e SinglePairEthernet::getDeviceId(adin2111_DeviceId_t *pDevId)
+{
+    return adin2111_GetDeviceId(hdev, pDevId);
+}
+
+adi_eth_Result_e SinglePairEthernet::enable()
+{
+    return adin2111_Enable(hdev);
+}
+
+adi_eth_Result_e SinglePairEthernet::disable()
+{
+    return adin2111_Disable(hdev);
+}
+
+adi_eth_Result_e SinglePairEthernet::reset(adi_eth_ResetType_e resetType)
+{
+    return adin2111_Reset(hdev, resetType);
+}
+
+adi_eth_Result_e SinglePairEthernet::syncConfig()
+{
+    return adin2111_SyncConfig(hdev);
+}
+
+adi_eth_Result_e SinglePairEthernet::getLinkStatus(adin2111_Port_e port, adi_eth_LinkStatus_e *linkStatus)
+{
+    return adin2111_GetLinkStatus(hdev, port, linkStatus);
+}
+
+adi_eth_Result_e SinglePairEthernet::getStatCounters(adin2111_Port_e port, adi_eth_MacStatCounters_t *stat)
+{
+    return adin2111_GetStatCounters(hdev, port, stat);
+}
+
+adi_eth_Result_e SinglePairEthernet::ledEn(adin2111_Port_e port, bool enable)
+{
+    return adin2111_LedEn(hdev, port, enable);
+}
+
+adi_eth_Result_e SinglePairEthernet::setLoopbackMode(adin2111_Port_e port, adi_phy_LoopbackMode_e loopbackMode)
+{
+    return adin2111_SetLoopbackMode(hdev, port, loopbackMode);
+}
+
+adi_eth_Result_e SinglePairEthernet::setTestMode(adin2111_Port_e port, adi_phy_TestMode_e testMode)
+{
+    return adin2111_SetTestMode(hdev, port, testMode);
+}
+
+adi_eth_Result_e SinglePairEthernet::addAddressFilter(uint8_t *macAddr, uint8_t *macAddrMask, adi_mac_AddressRule_t addrRule)
+{
+    return adin2111_AddAddressFilter(hdev, macAddr, macAddrMask, addrRule);
+}
+
+adi_eth_Result_e SinglePairEthernet::clearAddressFilter(uint32_t addrIndex)
+{
+    return adin2111_ClearAddressFilter(hdev, addrIndex);
+}
+
+adi_eth_Result_e SinglePairEthernet::submitTxBuffer(adin2111_TxPort_e port, adi_eth_BufDesc_t *pBufDesc)
+{
+    return adin2111_SubmitTxBuffer(hdev, port, pBufDesc);
+}
+
+adi_eth_Result_e SinglePairEthernet::submitRxBuffer(adi_eth_BufDesc_t *pBufDesc)
+{
+    return adin2111_SubmitRxBuffer(hdev, pBufDesc);
+}
+
+#if defined(ADI_MAC_ENABLE_RX_QUEUE_HI_PRIO)
+adi_eth_Result_e SinglePairEthernet::submitRxBufferHp(adi_eth_BufDesc_t *pBufDesc)
+{
+    return adin2111_SubmitRxBufferHp(hdev, pBufDesc);
+}
+#endif
+
+adi_eth_Result_e SinglePairEthernet::setPromiscuousMode(adin2111_Port_e port, bool bFlag)
+{
+    return adin2111_SetPromiscuousMode(hdev, port, bFlag);
+}
+
+adi_eth_Result_e SinglePairEthernet::getPromiscuousMode(adin2111_Port_e port, bool *pFlag)
+{
+    return adin2111_GetPromiscuousMode(hdev, port, pFlag);
+}
+
+#if defined(SPI_OA_EN)
+adi_eth_Result_e SinglePairEthernet::setChunkSize(adi_mac_OaCps_e cps)
+{
+    return adin2111_SetChunkSize(hdev, cps);
+}
+
+adi_eth_Result_e SinglePairEthernet::getChunkSize(adi_mac_OaCps_e *pCps)
+{
+    return adin2111_GetChunkSize(hdev, pCps);
+}
+#endif
+
+adi_eth_Result_e SinglePairEthernet::setCutThroughMode(bool txcte, bool rxcte, bool p2pcte)
+{
+    return adin2111_SetCutThroughMode(hdev, txcte, rxcte, p2pcte);
+}
+
+adi_eth_Result_e SinglePairEthernet::getCutThroughMode(bool *pTxcte, bool *pRxcte, bool *p2pcte)
+{
+    return adin2111_GetCutThroughMode(hdev, pTxcte, pRxcte, p2pcte);
+}
+
+adi_eth_Result_e SinglePairEthernet::setFifoSizes(adi_mac_FifoSizes_t fifoSizes)
+{
+    return adin2111_SetFifoSizes(hdev, fifoSizes);
+}
+
+adi_eth_Result_e SinglePairEthernet::getFifoSizes(adi_mac_FifoSizes_t *pFifoSizes)
+{
+    return adin2111_GetFifoSizes(hdev, pFifoSizes);
+}
+
+adi_eth_Result_e SinglePairEthernet::clearFifos(adi_mac_FifoClrMode_e clearMode)
+{
+    return adin2111_ClearFifos(hdev, clearMode);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsEnable(adi_mac_TsFormat_e format)
+{
+    return adin2111_TsEnable(hdev, format);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsClear()
+{
+    return adin2111_TsClear(hdev);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsTimerStart(adi_mac_TsTimerConfig_t *pTimerConfig)
+{
+    return adin2111_TsTimerStart(hdev, pTimerConfig);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsTimerStop()
+{
+    return adin2111_TsTimerStop(hdev);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsSetTimerAbsolute(uint32_t seconds, uint32_t nanoseconds)
+{
+    return adin2111_TsSetTimerAbsolute(hdev, seconds, nanoseconds);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsSyncClock(int64_t tError, uint64_t referenceTimeNsDiff, uint64_t localTimeNsDiff)
+{
+    return adin2111_TsSyncClock(hdev, tError, referenceTimeNsDiff, localTimeNsDiff);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsGetEgressTimestamp(adi_mac_EgressCapture_e egressReg, adi_mac_TsTimespec_t *pCapturedTimespec)
+{
+    return adin2111_TsGetEgressTimestamp(hdev, egressReg, pCapturedTimespec);
+}
+
+adi_eth_Result_e SinglePairEthernet::tsConvert(uint32_t timestampLowWord, uint32_t timestampHighWord, adi_mac_TsFormat_e format, adi_mac_TsTimespec_t *pTimespec)
+{
+    return adin2111_TsConvert(timestampLowWord, timestampHighWord, format, pTimespec);
+}
+
+int64_t SinglePairEthernet::tsSubtract(adi_mac_TsTimespec_t *pTsA, adi_mac_TsTimespec_t *pTsB)
+{
+    return adin2111_TsSubtract(pTsA, pTsB);
+}
+
+adi_eth_Result_e SinglePairEthernet::registerCallback(adi_eth_Callback_t cbFunc, adi_mac_InterruptEvt_e cbEvent)
+{
+    return adin2111_RegisterCallback(hdev, cbFunc, cbEvent);
+}
+
+adi_eth_Result_e SinglePairEthernet::setUserContext(void *pContext)
+{
+    return adin2111_SetUserContext(hdev, pContext);
+}
+
+void *SinglePairEthernet::getUserContext()
+{
+    return adin2111_GetUserContext(hdev);
+}
+
+adi_eth_Result_e SinglePairEthernet::writeRegister(uint16_t regAddr, uint32_t regData)
+{
+    return adin2111_WriteRegister(hdev, regAddr, regData);
+}
+
+adi_eth_Result_e SinglePairEthernet::readRegister(uint16_t regAddr, uint32_t *regData)
+{
+    return adin2111_ReadRegister(hdev, regAddr, regData);
+}
+
+adi_eth_Result_e SinglePairEthernet::phyWrite(adin2111_Port_e port, uint32_t regAddr, uint16_t regData)
+{
+    return adin2111_PhyWrite(hdev, port, regAddr, regData);
+}
+
+adi_eth_Result_e SinglePairEthernet::phyRead(adin2111_Port_e port, uint32_t regAddr, uint16_t *regData)
+{
+    return adin2111_PhyRead(hdev, port, regAddr, regData);
+}
+
+adi_eth_Result_e SinglePairEthernet::getMseLinkQuality(adin2111_Port_e port, adi_phy_MseLinkQuality_t *mseLinkQuality)
+{
+    return adin2111_GetMseLinkQuality(hdev, port, mseLinkQuality);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenEn(adin2111_Port_e port, bool enable)
+{
+    return adin2111_FrameGenEn(hdev, port, enable);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenSetMode(adin2111_Port_e port, adi_phy_FrameGenMode_e mode)
+{
+    return adin2111_FrameGenSetMode(hdev, port, mode);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenSetFrameCnt(adin2111_Port_e port, uint32_t frameCnt)
+{
+    return adin2111_FrameGenSetFrameCnt(hdev, port, frameCnt);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenSetFramePayload(adin2111_Port_e port, adi_phy_FrameGenPayload_e payload)
+{
+    return adin2111_FrameGenSetFramePayload(hdev, port, payload);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenSetFrameLen(adin2111_Port_e port, uint16_t frameLen)
+{
+    return adin2111_FrameGenSetFrameLen(hdev, port, frameLen);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenSetIfgLen(adin2111_Port_e port, uint16_t ifgLen)
+{
+    return adin2111_FrameGenSetIfgLen(hdev, port, ifgLen);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenRestart(adin2111_Port_e port)
+{
+    return adin2111_FrameGenRestart(hdev, port);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameGenDone(adin2111_Port_e port, bool *fgDone)
+{
+    return adin2111_FrameGenDone(hdev, port, fgDone);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameChkEn(adin2111_Port_e port, bool enable)
+{
+    return adin2111_FrameChkEn(hdev, port, enable);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameChkSourceSelect(adin2111_Port_e port, adi_phy_FrameChkSource_e source)
+{
+    return adin2111_FrameChkSourceSelect(hdev, port, source);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameChkReadFrameCnt(adin2111_Port_e port, uint32_t *cnt)
+{
+    return adin2111_FrameChkReadFrameCnt(hdev, port, cnt);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameChkReadRxErrCnt(adin2111_Port_e port, uint16_t *cnt)
+{
+    return adin2111_FrameChkReadRxErrCnt(hdev, port, cnt);
+}
+
+adi_eth_Result_e SinglePairEthernet::frameChkReadErrorCnt(adin2111_Port_e port, adi_phy_FrameChkErrorCounters_t *cnt)
+{
+    return adin2111_FrameChkReadErrorCnt(hdev, port, cnt);
 }

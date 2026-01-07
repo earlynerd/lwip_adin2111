@@ -20,10 +20,9 @@
 #include <Arduino.h>
 #include <SPI.h>
 
+static uint8_t cfg0_pin = 9; // Default if not set
+static uint8_t cfg1_pin = 8; // Default if not set
 
-
-#define NET_SPI_CFG0_PIN 9
-#define NET_SPI_CFG1_PIN 8
 // Enable this define to print all spi messages, note this will severely impact performance
 // #define DEBUG_SPI
 
@@ -82,16 +81,14 @@ void BSP_IRQCallback()
     }
 }
 #endif
-//void SPI_TxRxCpltCallback(void);
-//void BSP_IRQCallback(void);
-// Register the callback for the interrupt pin, in the driver the following macro is used:
-// extern uint32_t HAL_INT_N_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
+
+extern uint32_t HAL_INT_N_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
 uint32_t BSP_RegisterIRQCallback(ADI_CB const *intCallback, void *hDevice)
 {
     gpfGPIOIntCallback = (ADI_CB)intCallback;
     gpGPIOIntCBParam = hDevice;
 
-    //attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
+    // attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
     return 0;
 }
 /*
@@ -123,15 +120,15 @@ void BSP_getConfigPins(uint16_t *value)
 
 void BSP_disableInterrupts(void)
 {
-    //interrupts();
-    detachInterrupt(interrupt_pin);
+    // interrupts();
+    // detachInterrupt(interrupt_pin);
 }
 
 void BSP_enableInterrupts(void)
 {
-    //attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
-    //if(!digitalRead(interrupt_pin)) BSP_IRQCallback();      //if int pin has gone low while we werent looking for an edge, call it now manually
-    //interrupts();
+    // attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
+    // if(!digitalRead(interrupt_pin)) BSP_IRQCallback();      //if int pin has gone low while we werent looking for an edge, call it now manually
+    // interrupts();
 }
 
 /*
@@ -161,21 +158,21 @@ void BSP_delayMs(uint32_t delayms)
  */
 void BSP_HWReset(bool set)
 {
-    uint32_t buf=0;
+    uint32_t buf = 0;
     digitalWrite(reset_pin, LOW);
-    pinMode(NET_SPI_CFG0_PIN, OUTPUT);
-    pinMode(NET_SPI_CFG1_PIN, OUTPUT);
-    #ifdef SPI_PROT_EN
-    digitalWrite(NET_SPI_CFG0_PIN, LOW);
-    #else
-    digitalWrite(NET_SPI_CFG0_PIN, HIGH);
-    #endif
-    #ifdef SPI_OA_EN
-    digitalWrite(NET_SPI_CFG1_PIN, LOW);
-    #else
-    digitalWrite(NET_SPI_CFG1_PIN, HIGH);
-    #endif
-    
+    pinMode(cfg0_pin, OUTPUT);
+    pinMode(cfg1_pin, OUTPUT);
+#ifdef SPI_PROT_EN
+    digitalWrite(cfg0_pin, LOW);
+#else
+    digitalWrite(cfg0_pin, HIGH);
+#endif
+#ifdef SPI_OA_EN
+    digitalWrite(cfg1_pin, LOW);
+#else
+    digitalWrite(cfg1_pin, HIGH);
+#endif
+
     BSP_delayMs(RESET_DELAY);
     SPI_instance->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE3));
     SPI_instance->transfer(&buf, 4);
@@ -184,8 +181,8 @@ void BSP_HWReset(bool set)
     digitalWrite(reset_pin, HIGH);
 
     BSP_delayMs(AFTER_RESET_DELAY);
-    //pinMode(NET_SPI_CFG0_PIN, INPUT);
-    //pinMode(NET_SPI_CFG1_PIN, INPUT);
+    // pinMode(cfg0_pin, INPUT);
+    // pinMode(cfg1_pin, INPUT);
 }
 
 /* LED functions */
@@ -272,8 +269,6 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
     return 0;
 }
 
-
-
 // Register the SPI callback, in the driver the following macro is used:
 // extern uint32_t HAL_SPI_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
 uint32_t BSP_spi2_register_callback(ADI_CB const *pfCallback, void *const pCBParam)
@@ -298,10 +293,6 @@ void setSPI2Cs(bool set)
     }
 }
 
-
-
-
-
 uint32_t BSP_SysNow(void)
 {
     return millis();
@@ -314,8 +305,10 @@ uint32_t BSP_InitSystem(void)
     thread.set_priority(osPriorityHigh);
 #endif
     SPI_instance->begin();
-    pinMode(status_led_pin, OUTPUT_12MA);
-    pinMode(interrupt_pin, INPUT_PULLUP);
+    if (status_led_pin != 255)
+        pinMode(status_led_pin, OUTPUT_12MA);
+    if (interrupt_pin != 255)
+        pinMode(interrupt_pin, INPUT_PULLUP);
     digitalWrite(reset_pin, HIGH);
     pinMode(reset_pin, OUTPUT_12MA);
     pinMode(chip_select_pin, OUTPUT);
@@ -341,31 +334,16 @@ uint32_t BSP_ConfigSystemCS(uint8_t chip_select)
     return 0;
 }
 
-// User in the functions below, prints debug and error messages from within the driver
-uint32_t msgWrite(char *ptr)
+void BSP_SetSPIClass(void *spiClass)
 {
-    Serial.print(ptr);
-    return 0;
+    if (spiClass != NULL)
+    {
+        SPI_instance = (SPIClass *)spiClass;
+    }
 }
 
-char aDebugString[150u];
-
-void common_Fail(char *FailureReason)
+void BSP_SetCfgPins(uint8_t cfg0, uint8_t cfg1)
 {
-    char fail[] = "Failed: ";
-    char term[] = "\n\r";
-
-    /* Ignore return codes since there's nothing we can do if it fails */
-    msgWrite(fail);
-    msgWrite(FailureReason);
-    msgWrite(term);
-}
-
-void common_Perf(char *InfoString)
-{
-    char term[] = "\n\r";
-
-    /* Ignore return codes since there's nothing we can do if it fails */
-    msgWrite(InfoString);
-    msgWrite(term);
+    cfg0_pin = cfg0;
+    cfg1_pin = cfg1;
 }
