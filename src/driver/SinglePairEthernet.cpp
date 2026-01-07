@@ -53,7 +53,7 @@ void SinglePairEthernet::txCallback(void *pCBParam, uint32_t Event, void *pArg)
         txPool.release(pTxBufDesc->pBuf);
     }
     // mark hardware buffer slot available
-    if (idx >= 0 && idx < 4)
+    if (idx >= 0 && idx < SPE_NUM_BUFS)
     {
         txBufAvailable[idx] = true;
     }
@@ -91,7 +91,8 @@ void SinglePairEthernet::rxCallback(void *pCBParam, uint32_t Event, void *pArg)
         // to the OLD buffer. The hardware will effectively overwrite
         // this unread packet with the next one.
 
-        // Optional: Increment a "dropped packet" counter
+        // Increment dropped packet counter for debugging
+        rxPool.incrementDropped();
     }
     adi_eth_Result_e res = submitRxBuffer(pRxBufDesc);
     if (res != ADI_ETH_SUCCESS)
@@ -373,8 +374,8 @@ uint16_t SinglePairEthernet::sendFrame(uint8_t *data, int dataLen)
     int descIdx = -1;
     {
         // Short critical section to find a free slot
-        // uint32_t s = save_and_disable_interrupts();
-        for (int i = 0; i < 4; i++)
+        uint32_t s = save_and_disable_interrupts();
+        for (int i = 0; i < SPE_NUM_BUFS; i++)
         {
             if (txBufAvailable[i])
             {
@@ -383,7 +384,7 @@ uint16_t SinglePairEthernet::sendFrame(uint8_t *data, int dataLen)
                 break;
             }
         }
-        // restore_interrupts(s);
+        restore_interrupts(s);
     }
 
     if (descIdx == -1)
@@ -526,6 +527,16 @@ void SinglePairEthernet::discardFrame()
 bool SinglePairEthernet::getRxAvailable()
 {
     return rxPool.getLevel() > 0;
+}
+
+uint32_t SinglePairEthernet::getRxDroppedCount()
+{
+    return rxPool.getDroppedCount();
+}
+
+bool SinglePairEthernet::poolInitFailed()
+{
+    return rxPool.initFailed() || txPool.initFailed();
 }
 
 uint16_t SinglePairEthernet::getRxLength()

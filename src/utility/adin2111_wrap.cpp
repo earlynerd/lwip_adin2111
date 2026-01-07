@@ -37,6 +37,13 @@ bool ADIN2111_wrap::begin(const uint8_t *mac, struct netif *netif)
     memcpy(_mac, mac, 6);
     uint8_t retry = 0;
 
+    // Check if packet pools allocated successfully
+    if (adin2111.poolInitFailed())
+    {
+        Serial.println("FATAL: Packet pool memory allocation failed!");
+        return false;
+    }
+
     adin2111.setSPI(_spi);
 
     // adin2111.setRxCallback(rxcallback);
@@ -173,7 +180,7 @@ void ADIN2111_wrap::printStatus()
     {
         Serial.print("P2 Linkstatus: UP\r\n");
         Serial.printf("RX_FRM_CNT: %d,\tTX_FRM_CNT: %d,\tRX_BCAST_CNT: %d,\tTX_BCAST_CNT: %d\r\n", macstat2.RX_FRM_CNT, macstat2.TX_FRM_CNT, macstat2.RX_BCAST_CNT, macstat2.TX_BCAST_CNT);
-        Serial.printf("RX_LS_ERR_CNT: %d,\tRX_PHY_ERR_CNT: %d,\tRX_CRC_ERR_CNT: %d,\t,RX_DROP_FILT_CNT: %d,\tRX_DROP_FULL_CNT: %d\r\n", macstat2, macstat2.RX_PHY_ERR_CNT, macstat2.RX_CRC_ERR_CNT, macstat2.RX_DROP_FILT_CNT, macstat2.RX_DROP_FULL_CNT);
+        Serial.printf("RX_LS_ERR_CNT: %d,\tRX_PHY_ERR_CNT: %d,\tRX_CRC_ERR_CNT: %d,\tRX_DROP_FILT_CNT: %d,\tRX_DROP_FULL_CNT: %d\r\n", macstat2.RX_LS_ERR_CNT, macstat2.RX_PHY_ERR_CNT, macstat2.RX_CRC_ERR_CNT, macstat2.RX_DROP_FILT_CNT, macstat2.RX_DROP_FULL_CNT);
     }
     else
         Serial.print("P2 Linkstatus: DOWN\r\n");
@@ -190,6 +197,9 @@ void ADIN2111_wrap::printStatus()
     Serial.print("tx result counters:");
     if (!printResultCounters((uint32_t *)&adin2111.txResultCounters[0]))
         Serial.println(" no errors.");
+    uint32_t dropped = adin2111.getRxDroppedCount();
+    if (dropped > 0)
+        Serial.printf("\r\nRX packets dropped (pool exhausted): %lu", dropped);
     Serial.print("\r\n");
 }
 

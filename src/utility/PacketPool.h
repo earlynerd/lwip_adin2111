@@ -25,10 +25,18 @@ public:
 
     PacketPool() {
         _memoryBlock = (uint8_t*)malloc(RX_POOL_COUNT * RX_PACKET_SIZE);
+        if (_memoryBlock == nullptr) {
+            _initFailed = true;
+            return;
+        }
         for (int i = 0; i < RX_POOL_COUNT; i++) {
             _freeBuffers.push_back(_memoryBlock + (i * RX_PACKET_SIZE));
         }
     }
+
+    bool initFailed() const { return _initFailed; }
+    uint32_t getDroppedCount() const { return _droppedCount; }
+    void incrementDropped() { _droppedCount++; }
 
     // ISR: Get a fresh buffer to give to hardware
     uint8_t* getFreeBuffer() {
@@ -96,9 +104,11 @@ public:
     }
 
 private:
-    uint8_t* _memoryBlock;
+    uint8_t* _memoryBlock = nullptr;
     std::vector<uint8_t*> _freeBuffers;
     std::deque<RxPacket> _rxQueue;
+    bool _initFailed = false;
+    volatile uint32_t _droppedCount = 0;
 };
 
 // ==========================================================================
@@ -108,10 +118,16 @@ class TxPacketPool {
 public:
     TxPacketPool() {
         _memoryBlock = (uint8_t*)malloc(TX_POOL_COUNT * TX_PACKET_SIZE);
+        if (_memoryBlock == nullptr) {
+            _initFailed = true;
+            return;
+        }
         for (int i = 0; i < TX_POOL_COUNT; i++) {
             _freeBuffers.push_back(_memoryBlock + (i * TX_PACKET_SIZE));
         }
     }
+
+    bool initFailed() const { return _initFailed; }
 
     // Call from sendFrame: Get a buffer to copy lwIP data INTO
     uint8_t* allocate() {
@@ -139,6 +155,7 @@ public:
     }
 
 private:
-    uint8_t* _memoryBlock;
+    uint8_t* _memoryBlock = nullptr;
     std::vector<uint8_t*> _freeBuffers;
+    bool _initFailed = false;
 };

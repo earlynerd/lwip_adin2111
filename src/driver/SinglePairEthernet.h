@@ -151,6 +151,8 @@ public:
     bool    getRxAvailable          ();
     void discardFrame();
     uint16_t     getRxLength             ();
+    uint32_t    getRxDroppedCount       ();
+    bool    poolInitFailed          ();
 
     void setMac                     (uint8_t * mac);
     void getMac                     (uint8_t * mac);
