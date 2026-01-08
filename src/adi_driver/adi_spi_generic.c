@@ -333,6 +333,7 @@ adi_eth_Result_e MAC_Write(adi_mac_Device_t *hDevice, uint16_t regAddr, void *pB
     do
     {
         timeout--;
+        ADI_HAL_YIELD();  /* Allow other tasks to run during wait */
     } while (timeout && (hDevice->spiState != ADI_MAC_SPI_STATE_READY));
 
     if (!timeout)
@@ -537,6 +538,7 @@ adi_eth_Result_e MAC_Read(adi_mac_Device_t *hDevice, uint16_t regAddr, void *pBu
     do
     {
         timeout--;
+        ADI_HAL_YIELD();  /* Allow other tasks to run during wait */
     } while (timeout && (hDevice->spiState != ADI_MAC_SPI_STATE_READY));
 
     if (!timeout)

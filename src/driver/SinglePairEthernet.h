@@ -233,22 +233,6 @@ public:
     adi_eth_Result_e    frameChkReadErrorCnt    (adin2111_Port_e port, adi_phy_FrameChkErrorCounters_t *cnt);
     
     /**
-     * @brief Get per-port MAC statistics counters
-     * @param port Port to query (ADIN2111_PORT_1 or ADIN2111_PORT_2)
-     * @param stat Pointer to structure to receive statistics
-     * @return ADI_ETH_SUCCESS or error code
-     */
-    adi_eth_Result_e getStatCounters(adin2111_Port_e port, adi_eth_MacStatCounters_t *stat);
-
-    /**
-     * @brief Get link quality metrics (Mean Square Error)
-     * @param port Port to query
-     * @param mseLinkQuality Pointer to structure to receive MSE data
-     * @return ADI_ETH_SUCCESS or error code
-     */
-    adi_eth_Result_e getMseLinkQuality(adin2111_Port_e port, adi_phy_MseLinkQuality_t *mseLinkQuality);
-
-    /**
      * @brief Diagnostic information structure
      */
     struct DiagnosticInfo {

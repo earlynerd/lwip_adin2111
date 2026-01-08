@@ -121,7 +121,10 @@ extern "C" {
 #define ADI_MAC_SPI_CTRL_BUF_SIZE           (256)
 
 /*! Maximum number of iterations to wait for the SPI transaction to finish. */
+/*  Can be overridden in hal_port_specific.h for platform-specific tuning.  */
+#ifndef ADI_SPI_TIMEOUT
 #define ADI_SPI_TIMEOUT                     (100000)
+#endif
 
 /* MAC reset keys */
 /*! Key 1 for MAC-only reset. */

@@ -64,6 +64,21 @@ extern "C" {
 /*  values expressed in milliseconds, to a number of iterations when polling.  */
 #define ADI_HAL_MDIO_READ_DURATION  (1250)
 
+/*! Override the SPI timeout to a more reasonable value. */
+/*  The original value of 100,000 causes excessive busy-waiting under load. */
+/*  This reduced value still allows plenty of time for SPI completion. */
+/*  Pre-define here so adi_mac.h's #ifndef guard will skip its definition. */
+#define ADI_SPI_TIMEOUT             (5000)
+
+/*! Yield macro for SPI wait loops. On Arduino, this allows other tasks to run. */
+/*  Define ADI_HAL_YIELD() to be used in spinloops to prevent system lockup. */
+#ifdef ARDUINO
+  extern "C" void yield(void);
+  #define ADI_HAL_YIELD()           yield()
+#else
+  #define ADI_HAL_YIELD()           ((void)0)
+#endif
+
 /*! If set, it will disable the RX_RDY interrupt if no buffers are available */
 /*  in the Rx queue for receiving incoming frames. Otherwise incoming frames */
 /*  received while Rx queue is empty will be dropped.                        */

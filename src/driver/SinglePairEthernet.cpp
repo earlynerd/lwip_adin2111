@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include "SinglePairEthernet.h"
 #include "boardsupport.h"
+#include "BoardConfig.h"
 #include "../utility/ErrorLog.h"
 
 // Configuration constants
@@ -450,8 +451,21 @@ bool SinglePairEthernet::poolInitFailed()
 
 uint16_t SinglePairEthernet::getRxLength()
 {
-    BSP_IRQCallback();
+    // First check if we already have queued packets - fast path
     uint16_t sz = rxPool.peekNextPacketSize();
+    if (sz > 0)
+    {
+        return sz;
+    }
+
+    // Queue is empty - check if INT pin is asserted (LOW) indicating pending data
+    // Only process the interrupt if there's actually something to process
+    uint8_t intPin = BoardConfig::instance().getInterruptPin();
+    if (intPin != 255 && digitalRead(intPin) == LOW)
+    {
+        BSP_IRQCallback();
+        sz = rxPool.peekNextPacketSize();
+    }
     return sz;
 }
 
