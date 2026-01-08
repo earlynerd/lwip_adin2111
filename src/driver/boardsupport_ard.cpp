@@ -42,7 +42,7 @@ static ADI_CB gpfGPIOIntCallback = NULL;
 static void *gpGPIOIntCBParam = NULL;
 
 static uint8_t status_led_pin = LED_BUILTIN;
-static uint8_t interrupt_pin = 255;
+static uint8_t interrupt_pin = 6;
 static uint8_t reset_pin = DEFAULT_ETH_RESET_Pin;
 static uint8_t chip_select_pin = DEFAULT_ETH_SPI_CS_Pin;
 
@@ -174,7 +174,7 @@ void BSP_HWReset(bool set)
 #endif
 
     BSP_delayMs(RESET_DELAY);
-    SPI_instance->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE3));
+    SPI_instance->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
     SPI_instance->transfer(&buf, 4);
     SPI_instance->endTransaction();
     BSP_delayMs(RESET_DELAY);
@@ -309,8 +309,9 @@ uint32_t BSP_InitSystem(void)
         pinMode(status_led_pin, OUTPUT_12MA);
     if (interrupt_pin != 255)
         pinMode(interrupt_pin, INPUT_PULLUP);
-    digitalWrite(reset_pin, HIGH);
+
     pinMode(reset_pin, OUTPUT_12MA);
+    digitalWrite(reset_pin, LOW);
     pinMode(chip_select_pin, OUTPUT);
     digitalWrite(chip_select_pin, HIGH);
     pinMode(chip_select_pin, OUTPUT_12MA);

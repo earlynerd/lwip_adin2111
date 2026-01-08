@@ -147,15 +147,21 @@ bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs, uint8
 
     BSP_SetCfgPins(cfg0, cfg1);
 
-    BSP_ConfigSystem(255, 255, reset, cs);
+
+    BSP_ConfigSystem(255, intr, reset, cs);
+
     if (BSP_InitSystem())
     {
         return false;
     }
     uint8_t count = 0;
     BSP_HWReset(true);
-    while (digitalRead(intr))
-        ;
+
+
+    // Note: INT is not asserted until after init() configures the device.
+    // Skip waiting for INT here - the driver handles it properly. 
+        
+
     for (uint32_t i = 0; i < ADIN2111_INIT_ITER; i++)
     {
         result = init(&drvConfig);

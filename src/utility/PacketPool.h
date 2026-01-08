@@ -5,12 +5,12 @@
 #include <vector>
 
 // --- Configuration ---
-#define RX_POOL_COUNT  12
+#define RX_POOL_COUNT  16
 #define RX_PACKET_SIZE 1524
 
 // TX Pool: Needs to match your hardware queue depth (4) 
 // plus maybe 1-2 extra if you implement software queueing later.
-#define TX_POOL_COUNT  4  
+#define TX_POOL_COUNT  10  
 #define TX_PACKET_SIZE 1524
 
 // ==========================================================================
