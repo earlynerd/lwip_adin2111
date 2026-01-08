@@ -8,13 +8,16 @@
 #define RX_POOL_COUNT  16
 #define RX_PACKET_SIZE 1524
 
-// TX Pool: Needs to match your hardware queue depth (4) 
+// TX Pool: Needs to match your hardware queue depth (4)
 // plus maybe 1-2 extra if you implement software queueing later.
-#define TX_POOL_COUNT  10  
+#define TX_POOL_COUNT  10
 #define TX_PACKET_SIZE 1524
 
+// Memory allocation mode - uncomment to use static allocation instead of malloc
+// #define ADIN2111_STATIC_ALLOCATION
+
 // ==========================================================================
-// RX POOL (The one you are already using)
+// RX POOL
 // ==========================================================================
 class PacketPool {
 public:
@@ -24,14 +27,31 @@ public:
     };
 
     PacketPool() {
+#ifdef ADIN2111_STATIC_ALLOCATION
+        // Static allocation - use compile-time allocated array
+        _memoryBlock = _staticMemory;
+        _initFailed = false;
+#else
+        // Dynamic allocation - use malloc
         _memoryBlock = (uint8_t*)malloc(RX_POOL_COUNT * RX_PACKET_SIZE);
         if (_memoryBlock == nullptr) {
             _initFailed = true;
             return;
         }
+#endif
+        // Initialize free buffer list
         for (int i = 0; i < RX_POOL_COUNT; i++) {
             _freeBuffers.push_back(_memoryBlock + (i * RX_PACKET_SIZE));
         }
+    }
+
+    ~PacketPool() {
+#ifndef ADIN2111_STATIC_ALLOCATION
+        // Only free if dynamically allocated
+        if (_memoryBlock != nullptr) {
+            free(_memoryBlock);
+        }
+#endif
     }
 
     bool initFailed() const { return _initFailed; }
@@ -103,7 +123,23 @@ public:
         return _rxQueue.size();
     }
 
+    // Memory usage information
+    size_t getTotalMemory() const {
+        return RX_POOL_COUNT * RX_PACKET_SIZE;
+    }
+
+    const char* getAllocationMode() const {
+#ifdef ADIN2111_STATIC_ALLOCATION
+        return "STATIC";
+#else
+        return "DYNAMIC";
+#endif
+    }
+
 private:
+#ifdef ADIN2111_STATIC_ALLOCATION
+    static uint8_t _staticMemory[RX_POOL_COUNT * RX_PACKET_SIZE];
+#endif
     uint8_t* _memoryBlock = nullptr;
     std::vector<uint8_t*> _freeBuffers;
     std::deque<RxPacket> _rxQueue;
@@ -112,19 +148,36 @@ private:
 };
 
 // ==========================================================================
-// TX POOL (New!)
+// TX POOL
 // ==========================================================================
 class TxPacketPool {
 public:
     TxPacketPool() {
+#ifdef ADIN2111_STATIC_ALLOCATION
+        // Static allocation - use compile-time allocated array
+        _memoryBlock = _staticMemory;
+        _initFailed = false;
+#else
+        // Dynamic allocation - use malloc
         _memoryBlock = (uint8_t*)malloc(TX_POOL_COUNT * TX_PACKET_SIZE);
         if (_memoryBlock == nullptr) {
             _initFailed = true;
             return;
         }
+#endif
+        // Initialize free buffer list
         for (int i = 0; i < TX_POOL_COUNT; i++) {
             _freeBuffers.push_back(_memoryBlock + (i * TX_PACKET_SIZE));
         }
+    }
+
+    ~TxPacketPool() {
+#ifndef ADIN2111_STATIC_ALLOCATION
+        // Only free if dynamically allocated
+        if (_memoryBlock != nullptr) {
+            free(_memoryBlock);
+        }
+#endif
     }
 
     bool initFailed() const { return _initFailed; }
@@ -154,7 +207,23 @@ public:
         return _freeBuffers.size();
     }
 
+    // Memory usage information
+    size_t getTotalMemory() const {
+        return TX_POOL_COUNT * TX_PACKET_SIZE;
+    }
+
+    const char* getAllocationMode() const {
+#ifdef ADIN2111_STATIC_ALLOCATION
+        return "STATIC";
+#else
+        return "DYNAMIC";
+#endif
+    }
+
 private:
+#ifdef ADIN2111_STATIC_ALLOCATION
+    static uint8_t _staticMemory[TX_POOL_COUNT * TX_PACKET_SIZE];
+#endif
     uint8_t* _memoryBlock = nullptr;
     std::vector<uint8_t*> _freeBuffers;
     bool _initFailed = false;

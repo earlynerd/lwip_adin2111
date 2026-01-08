@@ -272,12 +272,26 @@ adi_eth_Result_e SinglePairEthernet::configureBuffers()
 // Private helper: Configure LED behavior
 void SinglePairEthernet::configureLEDs()
 {
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_POLARITY, config.ledPolarity);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_POLARITY, config.ledPolarity);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_CNTRL, config.ledControl);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_CNTRL, config.ledControl);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED0_BLINK_TIME_CNTRL, config.ledBlinkTime);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED0_BLINK_TIME_CNTRL, config.ledBlinkTime);
+    // LED configuration errors are non-fatal, but we log them
+    adi_eth_Result_e result;
+
+    result = adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_POLARITY, config.ledPolarity);
+    ErrorLog::checkAndLog(result, "LED polarity P1", initResultCounters);
+
+    result = adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_POLARITY, config.ledPolarity);
+    ErrorLog::checkAndLog(result, "LED polarity P2", initResultCounters);
+
+    result = adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_CNTRL, config.ledControl);
+    ErrorLog::checkAndLog(result, "LED control P1", initResultCounters);
+
+    result = adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_CNTRL, config.ledControl);
+    ErrorLog::checkAndLog(result, "LED control P2", initResultCounters);
+
+    result = adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED0_BLINK_TIME_CNTRL, config.ledBlinkTime);
+    ErrorLog::checkAndLog(result, "LED blink time P1", initResultCounters);
+
+    result = adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED0_BLINK_TIME_CNTRL, config.ledBlinkTime);
+    ErrorLog::checkAndLog(result, "LED blink time P2", initResultCounters);
 }
 
 // Private helper: Enable device and sync configuration
@@ -766,4 +780,185 @@ adi_eth_Result_e SinglePairEthernet::frameChkReadRxErrCnt(adin2111_Port_e port, 
 adi_eth_Result_e SinglePairEthernet::frameChkReadErrorCnt(adin2111_Port_e port, adi_phy_FrameChkErrorCounters_t *cnt)
 {
     return adin2111_FrameChkReadErrorCnt(hdev, port, cnt);
+}
+
+// Helper function to get error name string
+static const char* getErrorName(adi_eth_Result_e code)
+{
+    static const char* errorNames[] = {
+        "SUCCESS",
+        "MDIO_TIMEOUT",
+        "COMM_ERROR",
+        "COMM_ERROR_SECOND",
+        "COMM_TIMEOUT",
+        "UNSUPPORTED_DEVICE",
+        "DEVICE_UNINITIALIZED",
+        "HW_ERROR",
+        "INVALID_PARAM",
+        "PARAM_OUT_OF_RANGE",
+        "INVALID_HANDLE",
+        "IRQ_PENDING",
+        "READ_STATUS_TIMEOUT",
+        "INVALID_POWER_STATE",
+        "HAL_INIT_ERROR",
+        "INSUFFICIENT_FIFO_SPACE",
+        "CRC_ERROR",
+        "PROTECTION_ERROR",
+        "QUEUE_FULL",
+        "QUEUE_EMPTY",
+        "BUFFER_TOO_SMALL",
+        "INVALID_PORT",
+        "ADDRESS_FILTER_TABLE_FULL",
+        "MAC_BUSY",
+        "COMM_BUSY",
+        "SPI_ERROR",
+        "SW_RESET_TIMEOUT",
+        "CONFIG_SYNC_ERROR",
+        "VALUE_MISMATCH_ERROR",
+        "FIFO_SIZE_ERROR",
+        "TS_COUNTERS_DISABLED",
+        "NO_TS_FORMAT",
+        "NOT_IMPLEMENTED",
+        "NOT_IMPLEMENTED_SOFTWARE",
+        "UNSUPPORTED_FEATURE",
+        "PLACEHOLDER_ERROR"
+    };
+
+    int index = (int)code;
+    if (index >= 0 && index < 36) {
+        return errorNames[index];
+    }
+    return "UNKNOWN";
+}
+
+// Populate diagnostic information structure
+void SinglePairEthernet::getDiagnostics(DiagnosticInfo& info)
+{
+    // Clear structure
+    memset(&info, 0, sizeof(info));
+
+    // Pool status
+    info.rxDropped = rxPool.getDroppedCount();
+    info.rxQueueLevel = rxPool.getLevel();
+    info.txQueueLevel = txPool.getLevel();
+
+    // Link status
+    info.linkUp = isLinkUp();
+
+    // Collect non-zero init errors
+    info.initErrorCount = 0;
+    for (int i = 1; i < 36 && info.initErrorCount < DiagnosticInfo::MAX_ERRORS; i++) {
+        if (initResultCounters[i] > 0) {
+            info.initErrors[info.initErrorCount].code = (adi_eth_Result_e)i;
+            info.initErrors[info.initErrorCount].count = initResultCounters[i];
+            info.initErrorCount++;
+        }
+    }
+
+    // Collect non-zero RX errors
+    info.rxErrorCount = 0;
+    for (int i = 1; i < 36 && info.rxErrorCount < DiagnosticInfo::MAX_ERRORS; i++) {
+        if (rxResultCounters[i] > 0) {
+            info.rxErrors[info.rxErrorCount].code = (adi_eth_Result_e)i;
+            info.rxErrors[info.rxErrorCount].count = rxResultCounters[i];
+            info.rxErrorCount++;
+        }
+    }
+
+    // Collect non-zero TX errors
+    info.txErrorCount = 0;
+    for (int i = 1; i < 36 && info.txErrorCount < DiagnosticInfo::MAX_ERRORS; i++) {
+        if (txResultCounters[i] > 0) {
+            info.txErrors[info.txErrorCount].code = (adi_eth_Result_e)i;
+            info.txErrors[info.txErrorCount].count = txResultCounters[i];
+            info.txErrorCount++;
+        }
+    }
+}
+
+// Quick check for any errors
+bool SinglePairEthernet::hasErrors()
+{
+    // Check for non-zero error counters (skip index 0 = SUCCESS)
+    for (int i = 1; i < 36; i++) {
+        if (initResultCounters[i] > 0 || rxResultCounters[i] > 0 || txResultCounters[i] > 0) {
+            return true;
+        }
+    }
+    return rxPool.getDroppedCount() > 0;
+}
+
+// Print formatted diagnostics to Serial
+void SinglePairEthernet::printDiagnostics()
+{
+    DiagnosticInfo info;
+    getDiagnostics(info);
+
+    Serial.println("========== ADIN2111 Diagnostics ==========");
+
+    // Link Status
+    Serial.print("Link Status: ");
+    Serial.println(info.linkUp ? "UP" : "DOWN");
+
+    // Buffer Pool Status
+    Serial.println("\n--- Buffer Pools ---");
+    Serial.print("Memory Mode: ");
+    Serial.print(rxPool.getAllocationMode());
+    Serial.print(" (RX: ");
+    Serial.print(rxPool.getTotalMemory());
+    Serial.print(" bytes, TX: ");
+    Serial.print(txPool.getTotalMemory());
+    Serial.println(" bytes)");
+
+    Serial.print("RX Queue Level: ");
+    Serial.print(info.rxQueueLevel);
+    Serial.print("/");
+    Serial.println(RX_POOL_COUNT);
+
+    Serial.print("TX Queue Free: ");
+    Serial.print(info.txQueueLevel);
+    Serial.print("/");
+    Serial.println(TX_POOL_COUNT);
+
+    if (info.rxDropped > 0) {
+        Serial.print("RX Packets Dropped: ");
+        Serial.println(info.rxDropped);
+    }
+
+    // Error Counters
+    if (info.initErrorCount > 0) {
+        Serial.println("\n--- Initialization Errors ---");
+        for (int i = 0; i < info.initErrorCount; i++) {
+            Serial.print("  ");
+            Serial.print(getErrorName(info.initErrors[i].code));
+            Serial.print(": ");
+            Serial.println(info.initErrors[i].count);
+        }
+    }
+
+    if (info.rxErrorCount > 0) {
+        Serial.println("\n--- RX Errors ---");
+        for (int i = 0; i < info.rxErrorCount; i++) {
+            Serial.print("  ");
+            Serial.print(getErrorName(info.rxErrors[i].code));
+            Serial.print(": ");
+            Serial.println(info.rxErrors[i].count);
+        }
+    }
+
+    if (info.txErrorCount > 0) {
+        Serial.println("\n--- TX Errors ---");
+        for (int i = 0; i < info.txErrorCount; i++) {
+            Serial.print("  ");
+            Serial.print(getErrorName(info.txErrors[i].code));
+            Serial.print(": ");
+            Serial.println(info.txErrors[i].count);
+        }
+    }
+
+    if (!hasErrors() && info.rxDropped == 0) {
+        Serial.println("\nNo errors detected.");
+    }
+
+    Serial.println("==========================================");
 }
