@@ -11,7 +11,7 @@
 #include <SPI.h>
 #include "../adi_driver/adin2111.h"
 #include "../utility/PacketPool.h"
-// Instantiate the pool
+#include "../utility/Config.h"
 
 //Default MAC addresses used in Analog Devices examples
 #define MAC_ADDR_0_0        (0x00)
@@ -64,11 +64,9 @@ private:
     //bool rxSinceLastCheck;
 
     uint8_t macAddr[SPE_MAC_SIZE] = {MAC_ADDR_0_0, MAC_ADDR_0_1, MAC_ADDR_0_2, MAC_ADDR_0_3, MAC_ADDR_0_4, MAC_ADDR_0_5};
-    //uint8_t destMacAddr[SPE_MAC_SIZE] = {MAC_ADDR_1_0, MAC_ADDR_1_1, MAC_ADDR_1_2, MAC_ADDR_1_3, MAC_ADDR_1_4, MAC_ADDR_1_5};
 
     volatile adi_eth_LinkStatus_e    linkStatus;
-    
-    
+    ADIN2111Config config;  // Device configuration
 
 public:
     void    setSPI                  (SPIClass &spi);
@@ -76,8 +74,8 @@ public:
     adi_eth_Result_e    begin                   (uint8_t* retries, uint8_t cs_pin = DEFAULT_ETH_SPI_CS_Pin);
     adi_eth_Result_e    begin                   (uint8_t* retries, uint8_t status, uint8_t interrupt, uint8_t reset, uint8_t chip_select);
 
-    bool    begin                   (uint8_t* retries, uint8_t * mac, uint8_t cs_pin);
-    bool    begin                   (uint8_t* retries, uint8_t * mac, uint8_t cs, uint8_t intr, uint8_t reset, uint8_t cfg0, uint8_t cfg1);
+    bool    begin                   (uint8_t* retries, const uint8_t * mac, uint8_t cs_pin);
+    bool    begin                   (uint8_t* retries, const uint8_t * mac, uint8_t cs, uint8_t intr, uint8_t reset, uint8_t cfg0, uint8_t cfg1);
 
     // Wrapper methods from sfe_spe_advanced
     adin2111_DeviceHandle_t getDevice();
@@ -144,9 +142,9 @@ public:
     adi_eth_Result_e    frameChkReadErrorCnt    (adin2111_Port_e port, adi_phy_FrameChkErrorCounters_t *cnt);
     
     // Existing members
-    bool    sendData                (adin2111_TxPort_e port, uint8_t *data, int dataLen, uint8_t *destMac);
-    bool    sendData                (adin2111_TxPort_e port, uint8_t *data, int dataLen);
-    uint16_t    sendFrame             ( uint8_t *data, int dataLen);
+    bool    sendData                (adin2111_TxPort_e port, const uint8_t *data, int dataLen, const uint8_t *destMac);
+    bool    sendData                (adin2111_TxPort_e port, const uint8_t *data, int dataLen);
+    uint16_t    sendFrame             (const uint8_t *data, int dataLen);
     int     getRxData               (uint8_t *data, int dataLen, uint8_t *senderMac);
     bool    getRxAvailable          ();
     void discardFrame();
@@ -154,16 +152,26 @@ public:
     uint32_t    getRxDroppedCount       ();
     bool    poolInitFailed          ();
 
-    void setMac                     (uint8_t * mac);
+    void setMac                     (const uint8_t * mac);
     void getMac                     (uint8_t * mac);
-    void setDestMac                 (uint8_t * mac);
-    bool indenticalMacs             (uint8_t * mac1, uint8_t * mac2);
+    void setDestMac                 (const uint8_t * mac);
+    bool identicalMacs              (const uint8_t * mac1, const uint8_t * mac2);
 
     void setRxCallback              (void (*cbFunc)(adi_eth_BufDesc_t *));
     void setLinkCallback            (void (*cbFunc)(bool));
     bool getLinkStatus              (void);
     bool isLinkUp                   (void); // Returns cached link status
-    adi_eth_Result_e    enableDefaultBehavior   (); 
+    adi_eth_Result_e    enableDefaultBehavior   ();
+
+private:
+    // Private helper methods for initialization
+    adi_eth_Result_e    configureMACFilters    ();
+    adi_eth_Result_e    configureCallbacks     ();
+    adi_eth_Result_e    configureBuffers       ();
+    void                configureLEDs          ();
+    adi_eth_Result_e    finalizeEnable         ();
+
+public:
     //User callbacks
     void (*userRxCallback)(adi_eth_BufDesc_t *);
     void (*userLinkCallback)(bool connected);

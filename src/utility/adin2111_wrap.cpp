@@ -46,7 +46,6 @@ bool ADIN2111_wrap::begin(const uint8_t *mac, struct netif *netif)
 
     adin2111.setSPI(_spi);
 
-    // adin2111.setRxCallback(rxcallback);
     bool success = adin2111.begin(&retry, (uint8_t *)mac, _cs, _intr, _reset, _cfg0, _cfg1);
 
     uint32_t dat = 0;
@@ -59,15 +58,11 @@ bool ADIN2111_wrap::begin(const uint8_t *mac, struct netif *netif)
     else
         Serial.println("Adin init fail");
     return success;
-    // return (readReg(ADIN_CONFIG0) & ADIN_CONFIG0_SYNC);
 }
 
 void ADIN2111_wrap::end()
 {
-    // uint32_t cfg = readReg(ADIN_CONFIG0);
-    // cfg &= ~(ADIN_CONFIG0_TXE | ADIN_CONFIG0_RXE);
-    // writeReg(ADIN_CONFIG0, cfg);
-    //_spi.end();
+    // Empty implementation - hardware cleanup not required
 }
 
 void ADIN2111_wrap::checkLinkStatus()
@@ -129,10 +124,8 @@ uint16_t ADIN2111_wrap::readFrameData(uint8_t *buffer, uint16_t len)
 
 void ADIN2111_wrap::discardFrame(uint16_t len)
 {
+    (void)len;  // Unused parameter
     adin2111.discardFrame();
-    // uint8_t buf[SPE_MAX_BUF_FRAME_SIZE];
-    // uint8_t rxmac[6];
-    // adin2111.getRxData(buf, len, rxmac);
 }
 
 void ADIN2111_wrap::printStatus()

@@ -15,13 +15,11 @@
  */
 
 #include "boardsupport.h"
+#include "BoardConfig.h"
 #include <string.h>
 #define NET_SPI_DATARATE 25000000
 #include <Arduino.h>
 #include <SPI.h>
-
-static uint8_t cfg0_pin = 9; // Default if not set
-static uint8_t cfg1_pin = 8; // Default if not set
 
 // Enable this define to print all spi messages, note this will severely impact performance
 // #define DEBUG_SPI
@@ -34,19 +32,6 @@ rtos::Semaphore updates(0);
 
 #define RESET_DELAY (5)
 #define AFTER_RESET_DELAY (90)
-
-static ADI_CB gpfSpiCallback = NULL;
-static void *gpSpiCBParam = NULL;
-
-static ADI_CB gpfGPIOIntCallback = NULL;
-static void *gpGPIOIntCBParam = NULL;
-
-static uint8_t status_led_pin = LED_BUILTIN;
-static uint8_t interrupt_pin = 6;
-static uint8_t reset_pin = DEFAULT_ETH_RESET_Pin;
-static uint8_t chip_select_pin = DEFAULT_ETH_SPI_CS_Pin;
-
-static SPIClass *SPI_instance = &SPI;
 
 #if defined(ARDUINO_ARCH_MBED)
 // MBED will not allow SPI calls during ISR, which the callbacks may do
@@ -65,9 +50,10 @@ void thread_fn(void)
         // Once acquired, the IRQCallback function has run
         updates.acquire();
 
-        if (gpfGPIOIntCallback)
+        ADI_CB callback = BoardConfig::instance().getGPIOIntCallback();
+        if (callback)
         {
-            (*gpfGPIOIntCallback)(gpGPIOIntCBParam, 0, NULL);
+            (*callback)(BoardConfig::instance().getGPIOIntCallbackParam(), 0, NULL);
         }
     }
 }
@@ -75,9 +61,10 @@ void thread_fn(void)
 // Outside of mbed cores, we just call the callback within the ISR
 void BSP_IRQCallback()
 {
-    if (gpfGPIOIntCallback)
+    ADI_CB callback = BoardConfig::instance().getGPIOIntCallback();
+    if (callback)
     {
-        (*gpfGPIOIntCallback)(gpGPIOIntCBParam, 0, NULL);
+        (*callback)(BoardConfig::instance().getGPIOIntCallbackParam(), 0, NULL);
     }
 }
 #endif
@@ -85,10 +72,7 @@ void BSP_IRQCallback()
 extern uint32_t HAL_INT_N_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
 uint32_t BSP_RegisterIRQCallback(ADI_CB const *intCallback, void *hDevice)
 {
-    gpfGPIOIntCallback = (ADI_CB)intCallback;
-    gpGPIOIntCBParam = hDevice;
-
-    // attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
+    BoardConfig::instance().setGPIOIntCallback((ADI_CB)intCallback, hDevice);
     return 0;
 }
 /*
@@ -159,30 +143,30 @@ void BSP_delayMs(uint32_t delayms)
 void BSP_HWReset(bool set)
 {
     uint32_t buf = 0;
-    digitalWrite(reset_pin, LOW);
-    pinMode(cfg0_pin, OUTPUT);
-    pinMode(cfg1_pin, OUTPUT);
+    BoardConfig& cfg = BoardConfig::instance();
+
+    digitalWrite(cfg.getResetPin(), LOW);
+    pinMode(cfg.getCfg0Pin(), OUTPUT);
+    pinMode(cfg.getCfg1Pin(), OUTPUT);
 #ifdef SPI_PROT_EN
-    digitalWrite(cfg0_pin, LOW);
+    digitalWrite(cfg.getCfg0Pin(), LOW);
 #else
-    digitalWrite(cfg0_pin, HIGH);
+    digitalWrite(cfg.getCfg0Pin(), HIGH);
 #endif
 #ifdef SPI_OA_EN
-    digitalWrite(cfg1_pin, LOW);
+    digitalWrite(cfg.getCfg1Pin(), LOW);
 #else
-    digitalWrite(cfg1_pin, HIGH);
+    digitalWrite(cfg.getCfg1Pin(), HIGH);
 #endif
 
     BSP_delayMs(RESET_DELAY);
-    SPI_instance->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
-    SPI_instance->transfer(&buf, 4);
-    SPI_instance->endTransaction();
+    cfg.getSPIClass()->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
+    cfg.getSPIClass()->transfer(&buf, 4);
+    cfg.getSPIClass()->endTransaction();
     BSP_delayMs(RESET_DELAY);
-    digitalWrite(reset_pin, HIGH);
+    digitalWrite(cfg.getResetPin(), HIGH);
 
     BSP_delayMs(AFTER_RESET_DELAY);
-    // pinMode(cfg0_pin, INPUT);
-    // pinMode(cfg1_pin, INPUT);
 }
 
 /* LED functions */
@@ -202,7 +186,7 @@ static void bspLedToggle(uint16_t pin)
  */
 void BSP_HeartBeat(void)
 {
-    bspLedToggle(status_led_pin);
+    bspLedToggle(BoardConfig::instance().getStatusLedPin());
 }
 
 /*
@@ -210,22 +194,27 @@ void BSP_HeartBeat(void)
  */
 void BSP_HeartBeatLed(bool on)
 {
-    bspLedSet(status_led_pin, on);
+    bspLedSet(BoardConfig::instance().getStatusLedPin(), on);
 }
 
 /* All LEDs toggle, used to indicate hardware failure on the board */
 void BSP_LedToggleAll(void)
 {
-    bspLedSet(status_led_pin, HIGH);
+    bspLedSet(BoardConfig::instance().getStatusLedPin(), HIGH);
 }
 
 // Function called on SPI transaction completion
 void SPI_TxRxCpltCallback(void)
 {
-    // delayMicroseconds(1);
-    bspLedSet(chip_select_pin, HIGH);
-    SPI_instance->endTransaction();
-    (*gpfSpiCallback)(gpSpiCBParam, 0, NULL);
+    BoardConfig& cfg = BoardConfig::instance();
+    bspLedSet(cfg.getChipSelectPin(), HIGH);
+    cfg.getSPIClass()->endTransaction();
+
+    ADI_CB callback = cfg.getSPICallback();
+    if (callback)
+    {
+        (*callback)(cfg.getSPICallbackParam(), 0, NULL);
+    }
 }
 uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_t nbBytes, bool useDma)
 {
@@ -248,11 +237,13 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
     Serial.println();
 #endif
 
+    BoardConfig& cfg = BoardConfig::instance();
+    SPIClass* spi = cfg.getSPIClass();
+
     memcpy(pBufferRx, pBufferTx, nbBytes);
-    SPI_instance->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
-    bspLedSet(chip_select_pin, LOW);
-    // delayMicroseconds(1);
-    SPI_instance->transfer(pBufferRx, nbBytes);
+    spi->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
+    bspLedSet(cfg.getChipSelectPin(), LOW);
+    spi->transfer(pBufferRx, nbBytes);
     // Driver expects there to be an interrupt that fires after completion
     // Since SPI is blocking for arduino this is overly complicated, just call the "callback" function now
     SPI_TxRxCpltCallback();
@@ -273,8 +264,7 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
 // extern uint32_t HAL_SPI_Register_Callback(ADI_CB const *pfCallback, void *const pCBParam);
 uint32_t BSP_spi2_register_callback(ADI_CB const *pfCallback, void *const pCBParam)
 {
-    gpfSpiCallback = (ADI_CB)pfCallback;
-    gpSpiCBParam = pCBParam;
+    BoardConfig::instance().setSPICallback((ADI_CB)pfCallback, pCBParam);
     return 0;
 }
 
@@ -283,14 +273,7 @@ uint32_t BSP_spi2_register_callback(ADI_CB const *pfCallback, void *const pCBPar
  */
 void setSPI2Cs(bool set)
 {
-    if (set == true)
-    {
-        bspLedSet(chip_select_pin, HIGH);
-    }
-    else
-    {
-        bspLedSet(chip_select_pin, LOW);
-    }
+    bspLedSet(BoardConfig::instance().getChipSelectPin(), set ? HIGH : LOW);
 }
 
 uint32_t BSP_SysNow(void)
@@ -300,38 +283,43 @@ uint32_t BSP_SysNow(void)
 
 uint32_t BSP_InitSystem(void)
 {
+    BoardConfig& cfg = BoardConfig::instance();
+
 #if defined(ARDUINO_ARCH_MBED)
     thread.start(thread_fn);
     thread.set_priority(osPriorityHigh);
 #endif
-    SPI_instance->begin();
-    if (status_led_pin != 255)
-        pinMode(status_led_pin, OUTPUT_12MA);
-    if (interrupt_pin != 255)
-        pinMode(interrupt_pin, INPUT_PULLUP);
+    cfg.getSPIClass()->begin();
 
-    pinMode(reset_pin, OUTPUT_12MA);
-    digitalWrite(reset_pin, LOW);
-    pinMode(chip_select_pin, OUTPUT);
-    digitalWrite(chip_select_pin, HIGH);
-    pinMode(chip_select_pin, OUTPUT_12MA);
+    uint8_t statusPin = cfg.getStatusLedPin();
+    uint8_t intPin = cfg.getInterruptPin();
+    uint8_t rstPin = cfg.getResetPin();
+    uint8_t csPin = cfg.getChipSelectPin();
+
+    if (statusPin != 255)
+        pinMode(statusPin, OUTPUT_12MA);
+    if (intPin != 255)
+        pinMode(intPin, INPUT_PULLUP);
+
+    pinMode(rstPin, OUTPUT_12MA);
+    digitalWrite(rstPin, LOW);
+    pinMode(csPin, OUTPUT);
+    digitalWrite(csPin, HIGH);
+    pinMode(csPin, OUTPUT_12MA);
     return 0;
 }
 
-// Set all the pins that are uysed throughout this module
+// Set all the pins that are used throughout this module
 uint32_t BSP_ConfigSystem(uint8_t status, uint8_t interrupt, uint8_t reset, uint8_t chip_select)
 {
-    status_led_pin = status;
-    interrupt_pin = interrupt;
-    reset_pin = reset;
-    chip_select_pin = chip_select;
+    BoardConfig::instance().setSystemPins(status, interrupt, reset, chip_select);
     return 0;
 }
 
 // Change just the chip select pin
 uint32_t BSP_ConfigSystemCS(uint8_t chip_select)
 {
-    chip_select_pin = chip_select;
+    BoardConfig::instance().setChipSelectPin(chip_select);
     return 0;
 }
 
@@ -339,12 +327,11 @@ void BSP_SetSPIClass(void *spiClass)
 {
     if (spiClass != NULL)
     {
-        SPI_instance = (SPIClass *)spiClass;
+        BoardConfig::instance().setSPIClass((SPIClass *)spiClass);
     }
 }
 
 void BSP_SetCfgPins(uint8_t cfg0, uint8_t cfg1)
 {
-    cfg0_pin = cfg0;
-    cfg1_pin = cfg1;
+    BoardConfig::instance().setCfgPins(cfg0, cfg1);
 }

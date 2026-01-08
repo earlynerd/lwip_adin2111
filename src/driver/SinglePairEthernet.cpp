@@ -7,38 +7,43 @@
 #include <Arduino.h>
 #include "SinglePairEthernet.h"
 #include "boardsupport.h"
+#include "../utility/ErrorLog.h"
 
+// Configuration constants
 const int ADIN2111_INIT_ITER = 5;
+const uint16_t LED_POLARITY_ACTIVE_HIGH = 0x01;
+const uint16_t LED_CONTROL_DEFAULT = 0x8E84;
+const uint16_t LED_BLINK_TIME_DEFAULT = 0x0303;
+const uint16_t MIN_FRAME_PADDING_SIZE = 60;
 
-// The next three function are static member functions. Static member functions are needed to get a function
-// pointer that we can shove into the C function that attaches the interrupt in the driver.
-void SinglePairEthernet::linkCallback_C_Compatible(void *pCBParam, uint32_t Event, void *pArg)
+// Template helper to eliminate callback trampoline duplication
+// This retrieves the C++ object from the C callback parameters and invokes the member function
+template<void (SinglePairEthernet::*MemberFunc)(void*, uint32_t, void*)>
+static void callbackTrampoline(void *pCBParam, uint32_t Event, void *pArg)
 {
     adin2111_DeviceHandle_t device = reinterpret_cast<adin2111_DeviceHandle_t>(pCBParam);
     SinglePairEthernet *self = reinterpret_cast<SinglePairEthernet *>(adin2111_GetUserContext(device));
     if (self)
     {
-        self->linkCallback(pCBParam, Event, pArg);
+        (self->*MemberFunc)(pCBParam, Event, pArg);
     }
 }
+
+// Static member callback trampolines for C compatibility
+// These use the template helper to avoid code duplication
+void SinglePairEthernet::linkCallback_C_Compatible(void *pCBParam, uint32_t Event, void *pArg)
+{
+    callbackTrampoline<&SinglePairEthernet::linkCallback>(pCBParam, Event, pArg);
+}
+
 void SinglePairEthernet::txCallback_C_Compatible(void *pCBParam, uint32_t Event, void *pArg)
 {
-    adin2111_DeviceHandle_t device = reinterpret_cast<adin2111_DeviceHandle_t>(pCBParam);
-    SinglePairEthernet *self = reinterpret_cast<SinglePairEthernet *>(adin2111_GetUserContext(device));
-    if (self)
-    {
-        self->txCallback(pCBParam, Event, pArg);
-    }
+    callbackTrampoline<&SinglePairEthernet::txCallback>(pCBParam, Event, pArg);
 }
 
 void SinglePairEthernet::rxCallback_C_Compatible(void *pCBParam, uint32_t Event, void *pArg)
 {
-    adin2111_DeviceHandle_t device = reinterpret_cast<adin2111_DeviceHandle_t>(pCBParam);
-    SinglePairEthernet *self = reinterpret_cast<SinglePairEthernet *>(adin2111_GetUserContext(device));
-    if (self)
-    {
-        self->rxCallback(pCBParam, Event, pArg);
-    }
+    callbackTrampoline<&SinglePairEthernet::rxCallback>(pCBParam, Event, pArg);
 }
 
 void SinglePairEthernet::txCallback(void *pCBParam, uint32_t Event, void *pArg)
@@ -99,24 +104,6 @@ void SinglePairEthernet::rxCallback(void *pCBParam, uint32_t Event, void *pArg)
     {
         rxResultCounters[(int)res]++;
     }
-    // uint32_t i;
-    // for (i = 0; i < SPE_NUM_BUFS; i++)
-    // {
-    //    if (&rxBuf[i][0] == pRxBufDesc->pBuf)
-    //    {
-    //        rxBufAvailable[i] = true;
-    //        break;
-    //   }
-    //}
-
-    // Call user Callback
-    // if (userRxCallback && (pRxBufDesc->trxSize > SPE_FRAME_HEADER_SIZE))
-    //{
-    // userRxCallback(pRxBufDesc);     //call rxcallback with whole pbuf, no trimming
-    // pRxBufDesc->cbFunc = rxCallback_C_Compatible;
-
-    // rxBufAvailable[i] = false;
-    //}
 }
 
 void SinglePairEthernet::linkCallback(void *pCBParam, uint32_t Event, void *pArg)
@@ -135,7 +122,7 @@ void SinglePairEthernet::setSPI(SPIClass &spi)
     BSP_SetSPIClass(&spi);
 }
 
-bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs, uint8_t intr, uint8_t reset, uint8_t cfg0, uint8_t cfg1)
+bool SinglePairEthernet::begin(uint8_t *retries, const uint8_t *mac, uint8_t cs, uint8_t intr, uint8_t reset, uint8_t cfg0, uint8_t cfg1)
 {
     adi_eth_Result_e result = ADI_ETH_SUCCESS;
     if (mac)
@@ -162,7 +149,7 @@ bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs, uint8
     // Skip waiting for INT here - the driver handles it properly. 
         
 
-    for (uint32_t i = 0; i < ADIN2111_INIT_ITER; i++)
+    for (uint32_t i = 0; i < config.initRetries; i++)
     {
         result = init(&drvConfig);
         count++;
@@ -170,7 +157,7 @@ bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs, uint8
         {
             break;
         }
-        delay(100);
+        delay(config.initRetryDelay);
     }
     *retries += count - 1;
 
@@ -187,194 +174,160 @@ bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs, uint8
     return (result == ADI_ETH_SUCCESS);
 }
 
-bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t cs_pin)
+bool SinglePairEthernet::begin(uint8_t *retries, const uint8_t *mac, uint8_t cs_pin)
 {
-
-    adi_eth_Result_e result = ADI_ETH_SUCCESS;
-    // txBufIdx =  0;
-    if (mac)
-    {
-        memcpy(macAddr, mac, 6);
-        // setMac(mac);
-    }
-
-    BSP_ConfigSystemCS(cs_pin);
-    if (BSP_InitSystem())
-    {
-        return false;
-    }
-
-    BSP_HWReset(true);
-
-    uint8_t count = 0;
-    for (uint32_t i = 0; i < ADIN2111_INIT_ITER; i++)
-    {
-        result = init(&drvConfig);
-        count++;
-        if (result == ADI_ETH_SUCCESS)
-        {
-            break;
-        }
-    }
-    *retries += count - 1;
-
-    setUserContext((void *)this);
-    if (result != ADI_ETH_SUCCESS)
-    {
-        initResultCounters[(int)result]++;
-    }
-    else
-        result = enableDefaultBehavior();
-    if (result != ADI_ETH_SUCCESS)
-        initResultCounters[(int)result]++;
-    hdev = getDevice();
-    return (result == ADI_ETH_SUCCESS);
+    // Use default pin values (will not be configured by BSP)
+    // This simpler version doesn't configure cfg pins or interrupt
+    return begin(retries, mac, cs_pin, 255, DEFAULT_ETH_RESET_Pin, 9, 8);
 }
-/*
-bool SinglePairEthernet::begin(uint8_t *retries, uint8_t *mac, uint8_t status, uint8_t interrupt, uint8_t reset, uint8_t chip_select)
-{
-    adi_eth_Result_e result;
 
-    if (mac)
-    {
-        setMac(mac);
-    }
-
-    result = sfe_spe_advanced::begin(retries, status, interrupt, reset, chip_select);
-    if(result) Serial.println("fail, sfe advanced begin");
-    setUserContext((void *)this);
-    if (result == ADI_ETH_SUCCESS)
-    {
-        result = enableDefaultBehavior();
-        if(result) Serial.println("fail, enable defaults");
-    }
-
-    return (result == ADI_ETH_SUCCESS);
-}
-*/
-adi_eth_Result_e SinglePairEthernet::enableDefaultBehavior()
+// Private helper: Configure MAC address filters
+adi_eth_Result_e SinglePairEthernet::configureMACFilters()
 {
     adi_eth_Result_e result = ADI_ETH_SUCCESS;
-    int i = 0;
     uint8_t brcstMAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-    if (result == ADI_ETH_SUCCESS)
+    // Configure broadcast MAC filter
+    adi_mac_AddressRule_t addrRule;
+    addrRule.VALUE16 = 0x0000;
+    addrRule.TO_OTHER_PORT = 1;
+    addrRule.APPLY2PORT1 = 1;
+    addrRule.APPLY2PORT2 = 1;
+    addrRule.HOST_PRI = 0;
+    addrRule.TO_HOST = 1;
+    result = addAddressFilter(brcstMAC, NULL, addrRule);
+    if (result != ADI_ETH_SUCCESS)
     {
-        adi_mac_AddressRule_t addrRule;
-        addrRule.VALUE16 = 0x0000;
-        addrRule.TO_OTHER_PORT = 1;
-        addrRule.APPLY2PORT1 = 1;
-        addrRule.APPLY2PORT2 = 1;
-        addrRule.HOST_PRI = 0;
-        addrRule.TO_OTHER_PORT = 1;
-        addrRule.TO_HOST = 1;
-        result = addAddressFilter(brcstMAC, NULL, addrRule);
-        if (result)
-        {
-            Serial.println("fail, setting bcast mac");
-            initResultCounters[(int)result]++;
-        }
+        ErrorLog::logInitError("setting broadcast MAC filter", result);
+        initResultCounters[(int)result]++;
+        return result;
     }
 
-    if (result == ADI_ETH_SUCCESS)
+    // Configure own MAC filter
+    adi_mac_AddressRule_t rule;
+    rule.VALUE16 = 0;
+    rule.APPLY2PORT1 = 1;
+    rule.APPLY2PORT2 = 1;
+    rule.TO_OTHER_PORT = 0;
+    rule.HOST_PRI = 1;
+    rule.TO_HOST = 1;
+    uint8_t mask = 0xff;
+    result = addAddressFilter(macAddr, &mask, rule);
+    if (result != ADI_ETH_SUCCESS)
     {
-        adi_mac_AddressRule_t rule;
-        rule.VALUE16 = 0;
-        rule.APPLY2PORT1 = 1;
-        rule.APPLY2PORT2 = 1;
-        rule.TO_OTHER_PORT = 0;
-        rule.HOST_PRI = 1;
-        rule.TO_HOST = 1;
-        uint8_t mask = 0xff;
-        result = addAddressFilter(macAddr, &mask, rule);
-        if (result)
-        {
-            Serial.println("fail, setting own mac");
-            initResultCounters[(int)result]++;
-        }
+        ErrorLog::logInitError("setting own MAC filter", result);
+        initResultCounters[(int)result]++;
     }
-    if (result == ADI_ETH_SUCCESS)
+
+    return result;
+}
+
+// Private helper: Register event callbacks
+adi_eth_Result_e SinglePairEthernet::configureCallbacks()
+{
+    adi_eth_Result_e result = registerCallback(linkCallback_C_Compatible, ADI_MAC_EVT_LINK_CHANGE);
+    if (result != ADI_ETH_SUCCESS)
     {
-        // result = phyDriverEntry.RegisterCallback(hdev->pPhyDevice[0],linkCallback_C_Compatible,  ADI_PHY_EVT_LINK_STAT_CHANGE, (void*)1);
-        result = registerCallback(linkCallback_C_Compatible, ADI_MAC_EVT_LINK_CHANGE);
-        if (result)
-        {
-            Serial.println("fail, setting link callback");
-            initResultCounters[(int)result]++;
-        }
+        ErrorLog::logInitError("registering link callback", result);
+        initResultCounters[(int)result]++;
     }
+    return result;
+}
+
+// Private helper: Initialize RX/TX buffer descriptors
+adi_eth_Result_e SinglePairEthernet::configureBuffers()
+{
+    adi_eth_Result_e result = ADI_ETH_SUCCESS;
 
     for (uint32_t i = 0; i < SPE_NUM_BUFS; i++)
     {
         if (result != ADI_ETH_SUCCESS)
         {
-            initResultCounters[(int)result]++;
             break;
         }
+
         uint8_t *buf = rxPool.getFreeBuffer();
-        // All tx buffers start available to write, no rx buffers start available to read
+
+        // Initialize TX descriptor
         txBufAvailable[i] = true;
         txBufDesc[i].cbFunc = txCallback_C_Compatible;
         txBufDesc[i].bufSize = TX_PACKET_SIZE;
-        // rxBufAvailable[i] = false;
+
+        // Initialize RX descriptor
         rxBufDesc[i].pBuf = buf;
         rxBufDesc[i].bufSize = RX_PACKET_SIZE;
         rxBufDesc[i].cbFunc = rxCallback_C_Compatible;
 
         result = submitRxBuffer(&rxBufDesc[i]);
-        if (result)
+        if (result != ADI_ETH_SUCCESS)
         {
+            ErrorLog::logInitError("submitting RX buffer", result);
             initResultCounters[(int)result]++;
-            Serial.println("fail, submiting rxbuffer");
-        }
-    }
-
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_POLARITY, 0x01);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_POLARITY, 0x01);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_CNTRL, 0x8E84);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_CNTRL, 0x8E84);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED0_BLINK_TIME_CNTRL, 0x0303);
-    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED0_BLINK_TIME_CNTRL, 0x0303);
-
-    uint16_t dat;
-    // adin2111_PhyRead(hDevice, ADIN2111_PORT_1, ADDR_AN_ADV_ABILITY_H, &dat);
-    // adin2111_PhyWrite(hDevice, ADIN2111_PORT_1, ADDR_AN_ADV_ABILITY_H, dat & ~(BITM_AN_ADV_ABILITY_H_AN_ADV_B10L_TX_LVL_HI_ABL));
-
-    // adin2111_PhyRead(hDevice, ADIN2111_PORT_2, ADDR_AN_ADV_ABILITY_H, &dat);
-    // adin2111_PhyWrite(hDevice, ADIN2111_PORT_2, ADDR_AN_ADV_ABILITY_H, dat & ~(BITM_AN_ADV_ABILITY_H_AN_ADV_B10L_TX_LVL_HI_ABL));
-    // setPromiscuousMode(ADIN2111_PORT_1, true);
-    // setPromiscuousMode(ADIN2111_PORT_2, true);
-    uint32_t reg;
-
-    /// setCutThroughMode(false, false, true);
-    // if (result == ADI_ETH_SUCCESS)
-    //{
-    //     result = syncConfig();
-    //     if(result) Serial.println("fail, sync config 1");
-    // }
-    setCutThroughMode(false, false, false);
-    if (result == ADI_ETH_SUCCESS)
-    {
-        result = enable();
-        if (result)
-        {
-            initResultCounters[(int)result]++;
-            Serial.println("fail, while enable");
-        }
-    }
-    if (result == ADI_ETH_SUCCESS)
-    {
-        result = syncConfig();
-        if (result)
-        {
-            initResultCounters[(int)result]++;
-            Serial.println("fail, sync config 2");
         }
     }
 
     return result;
 }
-uint16_t SinglePairEthernet::sendFrame(uint8_t *data, int dataLen)
+
+// Private helper: Configure LED behavior
+void SinglePairEthernet::configureLEDs()
+{
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_POLARITY, config.ledPolarity);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_POLARITY, config.ledPolarity);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED_CNTRL, config.ledControl);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED_CNTRL, config.ledControl);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_1, ADDR_LED0_BLINK_TIME_CNTRL, config.ledBlinkTime);
+    adin2111_PhyWrite(hdev, ADIN2111_PORT_2, ADDR_LED0_BLINK_TIME_CNTRL, config.ledBlinkTime);
+}
+
+// Private helper: Enable device and sync configuration
+adi_eth_Result_e SinglePairEthernet::finalizeEnable()
+{
+    adi_eth_Result_e result = enable();
+    if (result != ADI_ETH_SUCCESS)
+    {
+        ErrorLog::logInitError("enabling device", result);
+        initResultCounters[(int)result]++;
+        return result;
+    }
+
+    result = syncConfig();
+    if (result != ADI_ETH_SUCCESS)
+    {
+        ErrorLog::logInitError("syncing configuration", result);
+        initResultCounters[(int)result]++;
+    }
+
+    return result;
+}
+
+// Main initialization function - orchestrates all setup steps
+adi_eth_Result_e SinglePairEthernet::enableDefaultBehavior()
+{
+    adi_eth_Result_e result = ADI_ETH_SUCCESS;
+
+    // Step 1: Configure MAC address filters
+    result = configureMACFilters();
+    if (result != ADI_ETH_SUCCESS) return result;
+
+    // Step 2: Register event callbacks
+    result = configureCallbacks();
+    if (result != ADI_ETH_SUCCESS) return result;
+
+    // Step 3: Initialize buffer descriptors
+    result = configureBuffers();
+    if (result != ADI_ETH_SUCCESS) return result;
+
+    // Step 4: Configure LED behavior
+    configureLEDs();
+
+    // Step 5: Set cut-through mode and enable device
+    setCutThroughMode(config.cutThroughTx, config.cutThroughRx, config.cutThroughP2P);
+    result = finalizeEnable();
+
+    return result;
+}
+uint16_t SinglePairEthernet::sendFrame(const uint8_t *data, int dataLen)
 {
     // 1. Find a free Hardware Descriptor slot
     int descIdx = -1;
@@ -398,7 +351,7 @@ uint16_t SinglePairEthernet::sendFrame(uint8_t *data, int dataLen)
         // Hardware is full. Drop packet.
         // Returning 0 tells lwIP something went wrong (ERR_MEM),
         // TCP will retry later.
-        Serial.println("[ADIN] Drop TX packet.");
+        ErrorLog::logWarning("TX descriptor queue full, dropping packet");
         return 0;
     }
 
@@ -407,7 +360,7 @@ uint16_t SinglePairEthernet::sendFrame(uint8_t *data, int dataLen)
     if (myBuffer == nullptr)
     {
         // Out of RAM buffers.
-        Serial.println("[ADIN] Out of TX Buffers.");
+        ErrorLog::logWarning("TX buffer pool exhausted, dropping packet");
         txBufAvailable[descIdx] = true; // Release the descriptor slot we grabbed
         return 0;
     }
@@ -418,11 +371,11 @@ uint16_t SinglePairEthernet::sendFrame(uint8_t *data, int dataLen)
         dataLen = TX_PACKET_SIZE;
     memcpy(myBuffer, data, dataLen);
     uint32_t submitLen = dataLen;
-    if (submitLen < 60)
+    if (submitLen < config.minFramePadding)
     {
         // Zero out the padding area to avoid leaking data
-        memset(myBuffer + dataLen, 0, 60 - dataLen);
-        submitLen = 60;
+        memset(myBuffer + dataLen, 0, config.minFramePadding - dataLen);
+        submitLen = config.minFramePadding;
     }
     // 4. Setup the Descriptor
     txBufDesc[descIdx].pBuf = myBuffer;
@@ -455,74 +408,10 @@ uint16_t SinglePairEthernet::sendFrame(uint8_t *data, int dataLen)
     return dataLen; // Success!
 }
 
-/*
-uint16_t SinglePairEthernet::sendFrame( uint8_t *data, int dataLen)
-{
-    adi_eth_Result_e result;
-
-    if (dataLen > SPE_FRAME_SIZE)
-    {
-        Serial.println("TX fail, length exceed");
-        return false;
-    }
-
-    //memcpy(&txBuf[txBufIdx][0], data, dataLen);
-    int transmitLength = dataLen;
-    // Pad with 0's to mininmum transmit length
-    while (transmitLength < SPE_MIN_PAYLOAD_SIZE)
-        txBuf[txBufIdx][transmitLength++] = 0;
-
-    txBufDesc[txBufIdx].pBuf = &txBuf[txBufIdx][0];
-    txBufDesc[txBufIdx].trxSize = transmitLength;
-    txBufDesc[txBufIdx].bufSize = SPE_MAX_BUF_FRAME_SIZE;
-    txBufDesc[txBufIdx].egressCapt = ADI_MAC_EGRESS_CAPTURE_NONE;
-    txBufDesc[txBufIdx].cbFunc = txCallback_C_Compatible;
-
-    txBufAvailable[txBufIdx] = false;
-
-    result = submitTxBuffer(ADIN2111_TX_PORT_AUTO, &txBufDesc[txBufIdx]);
-    if (result == ADI_ETH_SUCCESS)
-    {
-        txBufIdx = (txBufIdx + 1) % SPE_NUM_BUFS;
-        //setDestMac(destMac); // save most recently successfully sent mac address as the mac to use if none is provided in future calls
-    }
-    else
-    {
-        Serial.println("TX fail, submit buffer");
-        //If Tx buffer submission fails (for example the Tx queue
-        // may be full), then mark the buffer available.
-        txBufAvailable[txBufIdx] = true;
-    }
-
-    return (result == ADI_ETH_SUCCESS);
-}
-    */
-
 int SinglePairEthernet::getRxData(uint8_t *data, int dataLen, uint8_t *senderMac)
 {
     (void)senderMac;
     return rxPool.readAndRecycle(data, dataLen);
-    // bool rxDataAvailable = false;
-    // for (int i = 0; i < SPE_NUM_BUFS; i++)
-    // {
-    //     if (rxBufAvailable[rxBufIdx])
-    //{
-    //    rxDataAvailable = true;
-    //    break;
-    //}
-    // rxBufIdx = (rxBufIdx + 1) % SPE_NUM_BUFS;
-    //}
-    // if (rxDataAvailable)
-    //{
-    // int cpyLen = rxBufDesc[rxBufIdx].trxSize - SPE_FRAME_HEADER_SIZE;
-    // cpyLen = (cpyLen < dataLen) ? cpyLen : dataLen;
-    // memcpy(senderMac, (char *)&(rxBufDesc[rxBufIdx].pBuf[SPE_MAC_SIZE]), SPE_MAC_SIZE); // second set of 6 bytes are senders MAC address
-    // memcpy(data, (char *)&(rxBufDesc[rxBufIdx].pBuf[SPE_FRAME_HEADER_SIZE]), cpyLen);   // data starts 14 bytes in, after the frame header
-    // submitRxBuffer(&rxBufDesc[rxBufIdx]);
-    // rxBufAvailable[rxBufIdx] = false;
-    // rxSinceLastCheck = false;
-    // return cpyLen;
-    //}
 }
 
 void SinglePairEthernet::discardFrame()
@@ -549,22 +438,6 @@ uint16_t SinglePairEthernet::getRxLength()
 {
     BSP_IRQCallback();
     uint16_t sz = rxPool.peekNextPacketSize();
-
-    // bool rxDataAvailable = false;
-    // uint32_t idx = rxBufIdx;                    //dont modify, we are peeking
-    // for (int i = 0; i < SPE_NUM_BUFS; i++)
-    //{
-    //     if (rxBufAvailable[idx])
-    //     {
-    //        rxDataAvailable = true;
-    //        break;
-    //    }
-    //   idx = (idx + 1) % SPE_NUM_BUFS;
-    //}
-    // if (rxDataAvailable)
-    // {
-    //     return rxBufDesc[rxBufIdx].trxSize - SPE_FRAME_HEADER_SIZE;
-    // }
     return sz;
 }
 
@@ -573,18 +446,13 @@ adin2111_DeviceHandle_t SinglePairEthernet::getDevice()
     return hdev;
 }
 
-bool SinglePairEthernet::indenticalMacs(uint8_t *mac1, uint8_t *mac2)
+bool SinglePairEthernet::identicalMacs(const uint8_t *mac1, const uint8_t *mac2)
 {
     if (!mac1 || !mac2)
     {
         return false;
     }
-    return ((mac1[0] == mac2[0]) &&
-            (mac1[1] == mac2[1]) &&
-            (mac1[2] == mac2[2]) &&
-            (mac1[3] == mac2[3]) &&
-            (mac1[4] == mac2[4]) &&
-            (mac1[5] == mac2[5]));
+    return (memcmp(mac1, mac2, SPE_MAC_SIZE) == 0);
 }
 
 void SinglePairEthernet::setRxCallback(void (*cbFunc)(adi_eth_BufDesc_t *))
