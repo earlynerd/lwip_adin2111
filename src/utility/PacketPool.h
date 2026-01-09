@@ -13,7 +13,7 @@
 #define TX_PACKET_SIZE 1524
 
 // Memory allocation mode - uncomment to use static allocation instead of malloc
-// #define ADIN2111_STATIC_ALLOCATION
+#define ADIN2111_STATIC_ALLOCATION
 
 // ==========================================================================
 // RX POOL - Lock-free friendly design with fixed-size arrays
