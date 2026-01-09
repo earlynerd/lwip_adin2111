@@ -24,6 +24,12 @@
 // Enable this define to print all spi messages, note this will severely impact performance
 // #define DEBUG_SPI
 
+// Enable async SPI on arduino-pico (RP2040/RP2350) for better performance
+// The ADI driver's state machine is already designed for async operation
+#if defined(ARDUINO_ARCH_RP2040)
+#define USE_ASYNC_SPI
+#endif
+
 #if defined(ARDUINO_ARCH_MBED)
 #include <mbed.h>
 rtos::Thread thread;
@@ -210,12 +216,52 @@ void SPI_TxRxCpltCallback(void)
     bspLedSet(cfg.getChipSelectPin(), HIGH);
     cfg.getSPIClass()->endTransaction();
 
+#if defined(USE_ASYNC_SPI)
+    cfg.setSpiBusy(false);
+#endif
+
     ADI_CB callback = cfg.getSPICallback();
     if (callback)
     {
         (*callback)(cfg.getSPICallbackParam(), 0, NULL);
     }
 }
+
+#if defined(USE_ASYNC_SPI)
+// Callback for arduino-pico async SPI DMA completion
+void SPI_AsyncDoneCallback(void)
+{
+    SPI_TxRxCpltCallback();
+}
+
+// Wait for any ongoing async SPI transfer to complete
+// Useful during shutdown or when synchronous behavior is required
+void BSP_WaitForSpiComplete(void)
+{
+    BoardConfig& cfg = BoardConfig::instance();
+    SPIClass* spi = cfg.getSPIClass();
+
+    while (cfg.isSpiBusy())
+    {
+        // Poll until DMA transfer completes
+        // finishedAsync() returns true when transfer is done
+        if (spi->finishedAsync())
+        {
+            // Transfer finished but callback hasn't fired yet
+            // This shouldn't normally happen, but handle it gracefully
+            break;
+        }
+        yield(); // Allow other tasks to run
+    }
+}
+#else
+// Stub for platforms without async SPI - nothing to wait for
+void BSP_WaitForSpiComplete(void)
+{
+    // Synchronous SPI - transfer is always complete when function returns
+}
+#endif
+
 uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_t nbBytes, bool useDma)
 {
     // Validate parameters
@@ -223,22 +269,70 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
     {
         return 1;
     }
-    if (useDma)
-    { // no DMA support for arduino
+
+    BoardConfig& cfg = BoardConfig::instance();
+    SPIClass* spi = cfg.getSPIClass();
+
+#if defined(USE_ASYNC_SPI)
+    // Arduino-pico async SPI using DMA
+    // The ADI driver's state machine is already designed for async operation -
+    // it calls HAL_SpiReadWrite, returns, and expects spiCallback to be called
+    // when the transfer completes. We just need to make it actually async.
+
+    if (cfg.isSpiBusy())
+    {
+        // SPI transfer already in progress - this shouldn't happen if the
+        // driver's state machine is working correctly, but guard against it
         return 1;
     }
 
+    cfg.setSpiBusy(true);
+
 #ifdef DEBUG_SPI
-    Serial.printf("writing numbytes = %d: ", nbBytes);
-    for (int i = 0; i < nbBytes; i++)
+    Serial.printf("async writing numbytes = %d: ", nbBytes);
+    for (uint32_t i = 0; i < nbBytes; i++)
     {
         Serial.printf(" %02X", pBufferTx[i]);
     }
     Serial.println();
 #endif
 
-    BoardConfig& cfg = BoardConfig::instance();
-    SPIClass* spi = cfg.getSPIClass();
+    spi->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
+    bspLedSet(cfg.getChipSelectPin(), LOW);
+
+    // Register completion callback and start async transfer
+    spi->onTransferDone(SPI_AsyncDoneCallback);
+
+    // transferAsync returns true if transfer was started successfully
+    if (!spi->transferAsync(pBufferTx, pBufferRx, nbBytes))
+    {
+        // Async transfer failed to start - fall back to sync or report error
+        bspLedSet(cfg.getChipSelectPin(), HIGH);
+        spi->endTransaction();
+        cfg.setSpiBusy(false);
+        return 1;
+    }
+
+    // Transfer started - callback will fire when complete
+    // The driver state machine will continue in spiCallback
+    return 0;
+
+#else
+    // Synchronous SPI for other Arduino platforms
+    if (useDma)
+    {
+        // No DMA support for generic arduino
+        return 1;
+    }
+
+#ifdef DEBUG_SPI
+    Serial.printf("writing numbytes = %d: ", nbBytes);
+    for (uint32_t i = 0; i < nbBytes; i++)
+    {
+        Serial.printf(" %02X", pBufferTx[i]);
+    }
+    Serial.println();
+#endif
 
     memcpy(pBufferRx, pBufferTx, nbBytes);
     spi->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
@@ -250,7 +344,7 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
 
 #ifdef DEBUG_SPI
     Serial.printf("read: ");
-    for (int i = 0; i < nbBytes; i++)
+    for (uint32_t i = 0; i < nbBytes; i++)
     {
         Serial.printf(" %02X", pBufferRx[i]);
     }
@@ -258,6 +352,7 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
 #endif
 
     return 0;
+#endif // USE_ASYNC_SPI
 }
 
 // Register the SPI callback, in the driver the following macro is used:

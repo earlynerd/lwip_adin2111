@@ -118,8 +118,10 @@ extern "C"
   uint32_t BSP_spi0_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_t nbBytes);
   uint32_t BSP_spi0_register_callback(ADI_CB const *pfCallback, void *const pCBParam);
   uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_t nbBytes, bool useDma);
-  uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_t nbBytes, bool useDma);
   uint32_t BSP_spi2_register_callback(ADI_CB const *pfCallback, void *const pCBParam);
+
+  // Wait for async SPI to complete (only available on arduino-pico with USE_ASYNC_SPI)
+  void BSP_WaitForSpiComplete(void);
 
   void BSP_SetSPIClass(void *spiClass);
   void BSP_SetCfgPins(uint8_t cfg0, uint8_t cfg1);
