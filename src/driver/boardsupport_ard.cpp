@@ -28,6 +28,15 @@
 // The ADI driver's state machine is already designed for async operation
 #if defined(ARDUINO_ARCH_RP2040)
 #define USE_ASYNC_SPI
+#include "pico/time.h"
+#include "hardware/timer.h"
+
+// Timer alarm for SPI completion checking
+static alarm_id_t spi_alarm_id = 0;
+static volatile uint32_t pending_transfer_bytes = 0;
+
+// Forward declaration
+static int64_t spi_completion_alarm_callback(alarm_id_t id, void *user_data);
 #endif
 
 #if defined(ARDUINO_ARCH_MBED)
@@ -228,10 +237,45 @@ void SPI_TxRxCpltCallback(void)
 }
 
 #if defined(USE_ASYNC_SPI)
-// Callback for arduino-pico async SPI DMA completion
-void SPI_AsyncDoneCallback(void)
+// Calculate expected transfer time in microseconds
+// At 25 MHz: 8 bits per byte = 0.32 µs per byte
+// Add margin for DMA setup/teardown overhead
+static inline uint32_t calculate_transfer_time_us(uint32_t nbBytes)
 {
-    SPI_TxRxCpltCallback();
+    // SPI clock is 25 MHz = 25 bits/µs = 3.125 bytes/µs
+    // Time = nbBytes / 3.125 = nbBytes * 0.32 µs
+    // Use integer math: (nbBytes * 32) / 100, then add 10µs margin for DMA overhead
+    uint32_t transfer_time = (nbBytes * 32 + 99) / 100;  // Round up
+    return transfer_time + 10;  // Add 10µs margin
+}
+
+// Timer alarm callback - fires when transfer should be complete
+static int64_t spi_completion_alarm_callback(alarm_id_t id, void *user_data)
+{
+    (void)user_data;
+    BoardConfig& cfg = BoardConfig::instance();
+    SPIClass* spi = cfg.getSPIClass();
+
+    spi_alarm_id = 0;  // Clear alarm ID
+
+    if (!cfg.isSpiBusy())
+    {
+        // Already completed (shouldn't happen, but be safe)
+        return 0;
+    }
+
+    if (spi->finishedAsync())
+    {
+        // Transfer complete - fire the callback
+        SPI_TxRxCpltCallback();
+        return 0;  // Don't reschedule
+    }
+    else
+    {
+        // Not done yet - check again in 5µs
+        // Return positive value to reschedule relative to current time
+        return 5;
+    }
 }
 
 // Wait for any ongoing async SPI transfer to complete
@@ -243,15 +287,19 @@ void BSP_WaitForSpiComplete(void)
 
     while (cfg.isSpiBusy())
     {
-        // Poll until DMA transfer completes
-        // finishedAsync() returns true when transfer is done
         if (spi->finishedAsync())
         {
-            // Transfer finished but callback hasn't fired yet
-            // This shouldn't normally happen, but handle it gracefully
+            // Cancel pending alarm if any
+            if (spi_alarm_id != 0)
+            {
+                cancel_alarm(spi_alarm_id);
+                spi_alarm_id = 0;
+            }
+            // Fire callback manually
+            SPI_TxRxCpltCallback();
             break;
         }
-        yield(); // Allow other tasks to run
+        yield();
     }
 }
 #else
@@ -300,9 +348,6 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
     spi->beginTransaction(SPISettings(NET_SPI_DATARATE, MSBFIRST, SPI_MODE0));
     bspLedSet(cfg.getChipSelectPin(), LOW);
 
-    // Register completion callback and start async transfer
-    spi->onTransferDone(SPI_AsyncDoneCallback);
-
     // transferAsync returns true if transfer was started successfully
     if (!spi->transferAsync(pBufferTx, pBufferRx, nbBytes))
     {
@@ -313,7 +358,23 @@ uint32_t BSP_spi2_write_and_read(uint8_t *pBufferTx, uint8_t *pBufferRx, uint32_
         return 1;
     }
 
-    // Transfer started - callback will fire when complete
+    // Schedule timer alarm to check for completion
+    // Calculate when the transfer should be done based on byte count and SPI clock
+    uint32_t delay_us = calculate_transfer_time_us(nbBytes);
+    spi_alarm_id = add_alarm_in_us(delay_us, spi_completion_alarm_callback, NULL, true);
+
+    if (spi_alarm_id <= 0)
+    {
+        // Alarm allocation failed - fall back to busy-wait polling
+        // This shouldn't happen normally, but ensures we don't hang
+        while (!spi->finishedAsync())
+        {
+            tight_loop_contents();  // Hint to compiler this is a spin loop
+        }
+        SPI_TxRxCpltCallback();
+    }
+
+    // Transfer started - timer alarm will fire callback when complete
     // The driver state machine will continue in spiCallback
     return 0;
 
