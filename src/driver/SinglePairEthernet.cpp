@@ -796,55 +796,6 @@ adi_eth_Result_e SinglePairEthernet::frameChkReadErrorCnt(adin2111_Port_e port, 
     return adin2111_FrameChkReadErrorCnt(hdev, port, cnt);
 }
 
-// Helper function to get error name string
-static const char* getErrorName(adi_eth_Result_e code)
-{
-    static const char* errorNames[] = {
-        "SUCCESS",
-        "MDIO_TIMEOUT",
-        "COMM_ERROR",
-        "COMM_ERROR_SECOND",
-        "COMM_TIMEOUT",
-        "UNSUPPORTED_DEVICE",
-        "DEVICE_UNINITIALIZED",
-        "HW_ERROR",
-        "INVALID_PARAM",
-        "PARAM_OUT_OF_RANGE",
-        "INVALID_HANDLE",
-        "IRQ_PENDING",
-        "READ_STATUS_TIMEOUT",
-        "INVALID_POWER_STATE",
-        "HAL_INIT_ERROR",
-        "INSUFFICIENT_FIFO_SPACE",
-        "CRC_ERROR",
-        "PROTECTION_ERROR",
-        "QUEUE_FULL",
-        "QUEUE_EMPTY",
-        "BUFFER_TOO_SMALL",
-        "INVALID_PORT",
-        "ADDRESS_FILTER_TABLE_FULL",
-        "MAC_BUSY",
-        "COMM_BUSY",
-        "SPI_ERROR",
-        "SW_RESET_TIMEOUT",
-        "CONFIG_SYNC_ERROR",
-        "VALUE_MISMATCH_ERROR",
-        "FIFO_SIZE_ERROR",
-        "TS_COUNTERS_DISABLED",
-        "NO_TS_FORMAT",
-        "NOT_IMPLEMENTED",
-        "NOT_IMPLEMENTED_SOFTWARE",
-        "UNSUPPORTED_FEATURE",
-        "PLACEHOLDER_ERROR"
-    };
-
-    int index = (int)code;
-    if (index >= 0 && index < 36) {
-        return errorNames[index];
-    }
-    return "UNKNOWN";
-}
-
 // Populate diagnostic information structure
 void SinglePairEthernet::getDiagnostics(DiagnosticInfo& info)
 {
@@ -944,7 +895,7 @@ void SinglePairEthernet::printDiagnostics()
         Serial.println("\n--- Initialization Errors ---");
         for (int i = 0; i < info.initErrorCount; i++) {
             Serial.print("  ");
-            Serial.print(getErrorName(info.initErrors[i].code));
+            Serial.print(ErrorLog::getErrorName(info.initErrors[i].code));
             Serial.print(": ");
             Serial.println(info.initErrors[i].count);
         }
@@ -954,7 +905,7 @@ void SinglePairEthernet::printDiagnostics()
         Serial.println("\n--- RX Errors ---");
         for (int i = 0; i < info.rxErrorCount; i++) {
             Serial.print("  ");
-            Serial.print(getErrorName(info.rxErrors[i].code));
+            Serial.print(ErrorLog::getErrorName(info.rxErrors[i].code));
             Serial.print(": ");
             Serial.println(info.rxErrors[i].count);
         }
@@ -964,7 +915,7 @@ void SinglePairEthernet::printDiagnostics()
         Serial.println("\n--- TX Errors ---");
         for (int i = 0; i < info.txErrorCount; i++) {
             Serial.print("  ");
-            Serial.print(getErrorName(info.txErrors[i].code));
+            Serial.print(ErrorLog::getErrorName(info.txErrors[i].code));
             Serial.print(": ");
             Serial.println(info.txErrors[i].count);
         }

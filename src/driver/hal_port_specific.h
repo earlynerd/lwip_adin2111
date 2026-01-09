@@ -73,7 +73,7 @@ extern "C" {
 /*! Yield macro for SPI wait loops. On Arduino, this allows other tasks to run. */
 /*  Define ADI_HAL_YIELD() to be used in spinloops to prevent system lockup. */
 #ifdef ARDUINO
-  extern "C" void yield(void);
+  extern void yield(void);
   #define ADI_HAL_YIELD()           yield()
 #else
   #define ADI_HAL_YIELD()           ((void)0)
@@ -87,7 +87,7 @@ extern "C" {
 #define ADI_PAUSE_RX_IF_NO_BUFFERS  (0)
 
 /*! Indicates if the host IRQ is edge or level sensitive. */
-#define ADI_EDGE_SENSITIVE_IRQ      (1)
+#define ADI_EDGE_SENSITIVE_IRQ      (0)
 
 #ifdef __cplusplus
 }
