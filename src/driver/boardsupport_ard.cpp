@@ -104,15 +104,12 @@ void BSP_getConfigPins(uint16_t *value)
 
 void BSP_disableInterrupts(void)
 {
-    // interrupts();
-    // detachInterrupt(interrupt_pin);
+    // Not used in polling mode - interrupts are handled via getRxLength() polling
 }
 
 void BSP_enableInterrupts(void)
 {
-    // attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
-    // if(!digitalRead(interrupt_pin)) BSP_IRQCallback();      //if int pin has gone low while we werent looking for an edge, call it now manually
-    // interrupts();
+    // Not used in polling mode - interrupts are handled via getRxLength() polling
 }
 
 /*

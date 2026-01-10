@@ -10,6 +10,11 @@
 #include "BoardConfig.h"
 #include "../utility/ErrorLog.h"
 
+// Platform-specific interrupt control (matches PacketPool.h usage)
+#if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_RP2350) || defined(PICO_BOARD)
+#include "hardware/sync.h"
+#endif
+
 // Configuration constants
 const int ADIN2111_INIT_ITER = 5;
 const uint16_t LED_POLARITY_ACTIVE_HIGH = 0x01;
@@ -449,6 +454,9 @@ bool SinglePairEthernet::poolInitFailed()
     return rxPool.initFailed() || txPool.initFailed();
 }
 
+// Re-entrancy guard for manual interrupt processing
+static volatile bool _processingInterrupt = false;
+
 uint16_t SinglePairEthernet::getRxLength()
 {
     // First check if we already have queued packets - fast path
@@ -463,7 +471,21 @@ uint16_t SinglePairEthernet::getRxLength()
     uint8_t intPin = BoardConfig::instance().getInterruptPin();
     if (intPin != 255 && digitalRead(intPin) == LOW)
     {
-        BSP_IRQCallback();
+        // Prevent re-entrancy: if we're already processing an interrupt (from ISR),
+        // don't call the callback again to avoid deadlock/corruption
+        uint32_t saved = save_and_disable_interrupts();
+        if (!_processingInterrupt) {
+            _processingInterrupt = true;
+            restore_interrupts(saved);
+
+            BSP_IRQCallback();
+
+            saved = save_and_disable_interrupts();
+            _processingInterrupt = false;
+            restore_interrupts(saved);
+        } else {
+            restore_interrupts(saved);
+        }
         sz = rxPool.peekNextPacketSize();
     }
     return sz;

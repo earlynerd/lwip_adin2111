@@ -23,6 +23,28 @@
 #include "hal.h"
 #include "hal_port_specific.h"
 
+// Platform-specific interrupt control
+#if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_RP2350) || defined(PICO_BOARD)
+#include "hardware/sync.h"
+#elif defined(ARDUINO)
+#include <Arduino.h>
+// Fallback for other Arduino platforms using Arduino primitives
+static inline uint32_t hal_save_and_disable_interrupts(void) {
+    noInterrupts();
+    return 1;
+}
+static inline void hal_restore_interrupts(uint32_t state) {
+    (void)state;
+    interrupts();
+}
+#define save_and_disable_interrupts() hal_save_and_disable_interrupts()
+#define restore_interrupts(s) hal_restore_interrupts(s)
+#else
+// Non-Arduino fallback - must be implemented per platform
+static inline uint32_t save_and_disable_interrupts(void) { return 0; }
+static inline void restore_interrupts(uint32_t state) { (void)state; }
+#endif
+
 #ifdef MDIO_GPIO
 #include "../../mdio_gpio/mdio_gpio.h"
 #endif
@@ -74,20 +96,30 @@ uint32_t HAL_PhyWrite(uint8_t hwAddr, uint32_t RegAddr, uint16_t data)
 }
 
 
+// Global state for interrupt nesting - ADI driver uses these for critical sections
+static volatile uint32_t irqDisableCount = 0;
+static volatile uint32_t savedInterruptState = 0;
+
 uint32_t HAL_DisableIrq(void)
 {
-    return ADI_HAL_SUCCESS; //TODO
-     //HAL_INT_N_DisableIRQ();
-
-    // return ADI_HAL_SUCCESS;
+    // Use Pico SDK's save_and_disable_interrupts for proper critical section
+    // This is nestable - we track the count and only save state on first disable
+    if (irqDisableCount == 0) {
+        savedInterruptState = save_and_disable_interrupts();
+    }
+    irqDisableCount++;
+    return ADI_HAL_SUCCESS;
 }
 
 uint32_t HAL_EnableIrq(void)
 {
-    return ADI_HAL_SUCCESS; //TODO
-    // HAL_INT_N_EnableIRQ();
-
-    // return ADI_HAL_SUCCESS;
+    if (irqDisableCount > 0) {
+        irqDisableCount--;
+        if (irqDisableCount == 0) {
+            restore_interrupts(savedInterruptState);
+        }
+    }
+    return ADI_HAL_SUCCESS;
 }
 
 uint32_t HAL_SetPendingIrq(void)

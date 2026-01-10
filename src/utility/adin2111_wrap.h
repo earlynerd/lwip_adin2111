@@ -6,6 +6,13 @@
 #include "../driver/SinglePairEthernet.h"
 
 
+// Health monitoring configuration
+struct HealthConfig {
+    uint32_t watchdogTimeoutMs = 30000;     // 30 seconds without activity = stall
+    uint32_t maxConsecutiveErrors = 10;      // Trigger recovery after this many errors
+    bool autoRecoveryEnabled = true;         // Enable automatic recovery
+};
+
 class ADIN2111_wrap {
 public:
     SinglePairEthernet adin2111;
@@ -25,7 +32,7 @@ public:
     // miss interrupts if INT is already asserted when lwIP attaches the handler.
     // The lwIP template masks GPIO interrupts during processing to prevent storms.
     bool interruptIsPossible() { return _intr != -1; }
-    PinStatus interruptMode() { return LOW; } 
+    PinStatus interruptMode() { return LOW; }
 
     // Frame Handling
     // 1. Check for incoming frame and return size (0 if none)
@@ -46,6 +53,33 @@ public:
     bool isLinked();
     void printStatus();
 
+    // ==================== Health Monitoring & Recovery ====================
+
+    // Configure health monitoring parameters
+    void setHealthConfig(const HealthConfig& config) { _healthConfig = config; }
+    HealthConfig getHealthConfig() const { return _healthConfig; }
+
+    // Call this regularly (e.g., in loop()) to check health and auto-recover if needed
+    // Returns true if system is healthy, false if recovery was attempted
+    bool checkHealth();
+
+    // Manual recovery - resets the ADIN2111 and reinitializes
+    // Returns true if recovery was successful
+    bool recover();
+
+    // Get health statistics
+    struct HealthStats {
+        uint32_t lastActivityMs;           // millis() of last successful TX/RX
+        uint32_t consecutiveErrors;        // Current error streak
+        uint32_t totalRecoveries;          // Number of times recovery was triggered
+        uint32_t totalStalls;              // Number of stall events detected
+        bool isHealthy;                    // Current health status
+    };
+    HealthStats getHealthStats() const { return _healthStats; }
+
+    // Reset health statistics (call after intentional reset/reconnect)
+    void resetHealthStats();
+
 private:
     bool _lastLinkState = false;
 
@@ -57,8 +91,18 @@ private:
     int8_t _cfg0;
     int8_t _cfg1;
     SPIClass& _spi;
-    SPISettings _settings = {20000000, MSBFIRST, SPI_MODE0}; 
+    SPISettings _settings = {20000000, MSBFIRST, SPI_MODE0};
     uint8_t _mac[6];
     bool printResultCounters(uint32_t* counters);
     void printPhyState(adi_phy_State_e);
+
+    // Health monitoring state
+    HealthConfig _healthConfig;
+    HealthStats _healthStats = {0, 0, 0, 0, true};
+
+    // Record successful activity (resets watchdog)
+    void recordActivity();
+
+    // Check for error conditions that indicate problems
+    bool hasActiveErrors();
 };

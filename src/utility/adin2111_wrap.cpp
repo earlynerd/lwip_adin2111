@@ -53,8 +53,11 @@ bool ADIN2111_wrap::begin(const uint8_t *mac, struct netif *netif)
         success = (adin2111.readRegister(1, &dat) == ADI_ETH_SUCCESS);
     Serial.print("ADIN2111 Device ID: ");
     Serial.println(dat, HEX);
-    if (success)
+    if (success) {
         Serial.println("Adin init success");
+        // Initialize health monitoring
+        resetHealthStats();
+    }
     else
         Serial.println("Adin init fail");
     return success;
@@ -101,6 +104,9 @@ uint16_t ADIN2111_wrap::sendFrame(const uint8_t *data, uint16_t len)
     if (_lastLinkState)
     {
         uint16_t txd = adin2111.sendFrame((uint8_t *)data, (int)len);
+        if (txd > 0) {
+            recordActivity();  // Successful TX - reset watchdog
+        }
         return txd;
     }
     else
@@ -119,7 +125,11 @@ uint16_t ADIN2111_wrap::readFrameSize()
 uint16_t ADIN2111_wrap::readFrameData(uint8_t *buffer, uint16_t len)
 {
     uint8_t rxmac[6];
-    return adin2111.getRxData(buffer, len, rxmac);
+    uint16_t received = adin2111.getRxData(buffer, len, rxmac);
+    if (received > 0) {
+        recordActivity();  // Successful RX - reset watchdog
+    }
+    return received;
 }
 
 void ADIN2111_wrap::discardFrame(uint16_t len)
@@ -276,4 +286,124 @@ bool ADIN2111_wrap::printResultCounters(uint32_t *counters)
         }
     }
     return errors;
+}
+
+// ==================== Health Monitoring & Recovery Implementation ====================
+
+void ADIN2111_wrap::recordActivity()
+{
+    _healthStats.lastActivityMs = millis();
+    _healthStats.consecutiveErrors = 0;
+    _healthStats.isHealthy = true;
+}
+
+bool ADIN2111_wrap::hasActiveErrors()
+{
+    // Check for recent errors in the driver
+    for (int i = 1; i < 36; i++) {
+        // These error types indicate communication/hardware problems
+        if (i == (int)ADI_ETH_COMM_ERROR ||
+            i == (int)ADI_ETH_COMM_ERROR_SECOND ||
+            i == (int)ADI_ETH_COMM_TIMEOUT ||
+            i == (int)ADI_ETH_SPI_ERROR ||
+            i == (int)ADI_ETH_HW_ERROR) {
+            if (adin2111.txResultCounters[i] > 0 || adin2111.rxResultCounters[i] > 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool ADIN2111_wrap::checkHealth()
+{
+    uint32_t now = millis();
+
+    // Check for stall condition (no activity for too long while link is up)
+    if (_lastLinkState && _healthStats.lastActivityMs > 0) {
+        uint32_t elapsed = now - _healthStats.lastActivityMs;
+        if (elapsed > _healthConfig.watchdogTimeoutMs) {
+            Serial.println("[HEALTH] Watchdog timeout - no activity detected");
+            _healthStats.totalStalls++;
+            _healthStats.isHealthy = false;
+
+            if (_healthConfig.autoRecoveryEnabled) {
+                Serial.println("[HEALTH] Attempting automatic recovery...");
+                return recover();
+            }
+            return false;
+        }
+    }
+
+    // Check for error accumulation
+    if (hasActiveErrors()) {
+        _healthStats.consecutiveErrors++;
+        if (_healthStats.consecutiveErrors >= _healthConfig.maxConsecutiveErrors) {
+            Serial.printf("[HEALTH] Too many consecutive errors (%lu)\n",
+                         _healthStats.consecutiveErrors);
+            _healthStats.isHealthy = false;
+
+            if (_healthConfig.autoRecoveryEnabled) {
+                Serial.println("[HEALTH] Attempting automatic recovery...");
+                return recover();
+            }
+            return false;
+        }
+    }
+
+    // System appears healthy
+    return true;
+}
+
+bool ADIN2111_wrap::recover()
+{
+    Serial.println("[RECOVERY] Starting ADIN2111 recovery...");
+
+    // Notify lwIP that link is down
+    if (_netif) {
+        netif_set_link_down(_netif);
+    }
+    _lastLinkState = false;
+
+    // Perform hardware reset
+    Serial.println("[RECOVERY] Performing hardware reset...");
+    adin2111.reset(ADI_ETH_RESET_TYPE_MAC_ONLY);
+    delay(100);
+
+    // Reinitialize the driver
+    Serial.println("[RECOVERY] Reinitializing driver...");
+    uint8_t retries = 0;
+    bool success = adin2111.begin(&retries, _mac, _cs, _intr, _reset, _cfg0, _cfg1);
+
+    if (success) {
+        Serial.println("[RECOVERY] Driver reinitialized successfully");
+
+        // Clear error counters
+        memset(adin2111.initResultCounters, 0, sizeof(adin2111.initResultCounters));
+        memset(adin2111.rxResultCounters, 0, sizeof(adin2111.rxResultCounters));
+        memset(adin2111.txResultCounters, 0, sizeof(adin2111.txResultCounters));
+
+        // Reset health stats
+        _healthStats.consecutiveErrors = 0;
+        _healthStats.lastActivityMs = millis();
+        _healthStats.isHealthy = true;
+        _healthStats.totalRecoveries++;
+
+        Serial.printf("[RECOVERY] Recovery complete (total recoveries: %lu)\n",
+                     _healthStats.totalRecoveries);
+        return true;
+    } else {
+        Serial.println("[RECOVERY] Failed to reinitialize driver!");
+        _healthStats.totalRecoveries++;
+        return false;
+    }
+}
+
+void ADIN2111_wrap::resetHealthStats()
+{
+    _healthStats.lastActivityMs = millis();
+    _healthStats.consecutiveErrors = 0;
+    _healthStats.totalRecoveries = 0;
+    _healthStats.totalStalls = 0;
+    _healthStats.isHealthy = true;
 }
