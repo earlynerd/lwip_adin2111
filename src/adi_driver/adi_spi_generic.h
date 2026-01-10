@@ -19,7 +19,7 @@
 #define ADI_SPI_GENERIC_H
 
 #include "adi_mac.h"
-#include "hal.h"
+#include "../driver/hal.h"
 
 #ifdef __cplusplus
 extern "C" {

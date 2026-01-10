@@ -14,7 +14,7 @@
 */
 
 
-#include "hal.h"
+#include "../driver/hal.h"
 
 /* Lookup table of CRC32 constants */
 static const uint32_t crc32_tab[] = {

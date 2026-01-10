@@ -38,7 +38,7 @@
 #endif
 
 #include "adi_eth_common.h"
-#include "hal.h"
+#include "../driver/hal.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -26,7 +26,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "adi_eth_common.h"
+#include "../adi_driver/adi_eth_common.h"
 #include "hal_port_specific.h"
 
 #ifdef __cplusplus

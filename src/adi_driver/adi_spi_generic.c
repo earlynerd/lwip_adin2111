@@ -333,6 +333,7 @@ adi_eth_Result_e MAC_Write(adi_mac_Device_t *hDevice, uint16_t regAddr, void *pB
     do
     {
         timeout--;
+        ADI_HAL_YIELD();  /* Allow other tasks to run during wait */
     } while (timeout && (hDevice->spiState != ADI_MAC_SPI_STATE_READY));
 
     if (!timeout)
@@ -409,10 +410,10 @@ adi_eth_Result_e MAC_Write(adi_mac_Device_t *hDevice, uint16_t regAddr, void *pB
     ADI_HAL_SPI_READ_WRITE(hDevice->adinDevice, spiTxBuf, spiRxBuf, byteCount, useDma);
 
     if (blocking)
-    {   
-        /* This can potentially lock up the driver, will need to be loooked at (add timeout?). */
+    {
+        /* Wait for async SPI transfer to complete, yielding to allow callbacks to fire */
         while (hDevice->spiState != ADI_MAC_SPI_STATE_READY)
-            ;
+            ADI_HAL_YIELD();
     }
 end:
 
@@ -537,6 +538,7 @@ adi_eth_Result_e MAC_Read(adi_mac_Device_t *hDevice, uint16_t regAddr, void *pBu
     do
     {
         timeout--;
+        ADI_HAL_YIELD();  /* Allow other tasks to run during wait */
     } while (timeout && (hDevice->spiState != ADI_MAC_SPI_STATE_READY));
 
     if (!timeout)
@@ -608,9 +610,9 @@ adi_eth_Result_e MAC_Read(adi_mac_Device_t *hDevice, uint16_t regAddr, void *pBu
 
     if (blocking)
     {
-        /* This can potentially lock up the driver, will need to be looked at (add timeout?). */
+        /* Wait for async SPI transfer to complete, yielding to allow callbacks to fire */
         while (hDevice->spiState != ADI_MAC_SPI_STATE_READY)
-            ;
+            ADI_HAL_YIELD();
 
         /* 1 is the turnaround byte */
         uint32_t dataOffset = TX_HEADER + 1;
