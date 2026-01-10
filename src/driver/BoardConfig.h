@@ -22,9 +22,6 @@ private:
     ADI_CB gpioIntCallback = nullptr;
     void* gpioIntCBParam = nullptr;
 
-    // SPI async state (for arduino-pico DMA transfers)
-    volatile bool spiBusy = false;
-
     // SPI configuration
     SPIClass* spiInstance = &SPI;
 
@@ -91,8 +88,4 @@ public:
 
     ADI_CB getGPIOIntCallback() const { return gpioIntCallback; }
     void* getGPIOIntCallbackParam() const { return gpioIntCBParam; }
-
-    // SPI busy state accessors (for async transfers)
-    void setSpiBusy(bool busy) { spiBusy = busy; }
-    bool isSpiBusy() const { return spiBusy; }
 };
