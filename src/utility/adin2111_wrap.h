@@ -48,6 +48,8 @@ public:
 
 private:
     bool _lastLinkState = false;
+    uint32_t _lastLinkCheckMs = 0;
+    static constexpr uint32_t LINK_CHECK_INTERVAL_MS = 100;  // Check link at most every 100ms
 
     static void rxcallback(adi_eth_BufDesc_t *);
 
@@ -57,7 +59,7 @@ private:
     int8_t _cfg0;
     int8_t _cfg1;
     SPIClass& _spi;
-    SPISettings _settings = {20000000, MSBFIRST, SPI_MODE0}; 
+    SPISettings _settings = {25000000, MSBFIRST, SPI_MODE0};  // ADIN2111 supports up to 25MHz
     uint8_t _mac[6];
     bool printResultCounters(uint32_t* counters);
     void printPhyState(adi_phy_State_e);

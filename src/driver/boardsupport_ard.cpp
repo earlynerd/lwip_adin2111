@@ -33,6 +33,11 @@ rtos::Semaphore updates(0);
 #define RESET_DELAY (5)
 #define AFTER_RESET_DELAY (90)
 
+// Platform compatibility: OUTPUT_12MA is RP2040-specific
+#ifndef OUTPUT_12MA
+#define OUTPUT_12MA OUTPUT
+#endif
+
 #if defined(ARDUINO_ARCH_MBED)
 // MBED will not allow SPI calls during ISR, which the callbacks may do
 // So instead of directly calling in this function we start a thread that will call the callback after signalled to by this function
@@ -102,17 +107,34 @@ void BSP_getConfigPins(uint16_t *value)
 { /* This board has no config pins, so odnt do anything */
 }
 
+// Critical section protection for the ADI driver.
+// These disable/enable ALL interrupts to protect SPI transactions and
+// internal driver state. This is separate from GPIO interrupt attachment
+// which is managed by the lwIP template (LwipIntfDev).
+//
+// Note: We use Arduino's noInterrupts()/interrupts() for portability.
+// On RP2040, save_and_disable_interrupts()/restore_interrupts() could be
+// used for nested critical sections, but the ADI driver doesn't nest these calls.
+
+void BSP_DisableIRQ(void)
+{
+    noInterrupts();
+}
+
+void BSP_EnableIRQ(void)
+{
+    interrupts();
+}
+
+// Legacy aliases
 void BSP_disableInterrupts(void)
 {
-    // interrupts();
-    // detachInterrupt(interrupt_pin);
+    noInterrupts();
 }
 
 void BSP_enableInterrupts(void)
 {
-    // attachInterrupt(interrupt_pin, BSP_IRQCallback, FALLING);
-    // if(!digitalRead(interrupt_pin)) BSP_IRQCallback();      //if int pin has gone low while we werent looking for an edge, call it now manually
-    // interrupts();
+    interrupts();
 }
 
 /*

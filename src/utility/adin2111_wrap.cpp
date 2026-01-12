@@ -5,6 +5,11 @@
 #define ADIN_SPI_SPEED 25000000
 #include "PacketPool.h"
 
+// Platform compatibility: OUTPUT_12MA is RP2040-specific
+#ifndef OUTPUT_12MA
+#define OUTPUT_12MA OUTPUT
+#endif
+
 ADIN2111_wrap::ADIN2111_wrap(int8_t cs, SPIClass &spi, int8_t intr)
     : _cs(cs), _intr(intr), _spi(spi), _reset(7), _cfg0(9), _cfg1(8), _settings(ADIN_SPI_SPEED, MSBFIRST, SPI_MODE0)
 {
@@ -62,7 +67,12 @@ bool ADIN2111_wrap::begin(const uint8_t *mac, struct netif *netif)
 
 void ADIN2111_wrap::end()
 {
-    // Empty implementation - hardware cleanup not required
+    // Disable the device to stop packet processing
+    adin2111.disable();
+
+    // Clear the netif reference
+    _netif = nullptr;
+    _lastLinkState = false;
 }
 
 void ADIN2111_wrap::checkLinkStatus()
@@ -111,7 +121,13 @@ uint16_t ADIN2111_wrap::sendFrame(const uint8_t *data, uint16_t len)
 
 uint16_t ADIN2111_wrap::readFrameSize()
 {
-    checkLinkStatus();
+    // Rate-limit link status checks to avoid excessive overhead
+    uint32_t now = millis();
+    if ((now - _lastLinkCheckMs) >= LINK_CHECK_INTERVAL_MS) {
+        _lastLinkCheckMs = now;
+        checkLinkStatus();
+    }
+
     uint16_t fsz = adin2111.getRxLength();
     return fsz;
 }

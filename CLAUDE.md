@@ -79,6 +79,32 @@ This is an Arduino library that integrates the Analog Devices ADIN2111 dual-port
 - **SPI Speed**: ADIN2111 supports up to 25 MHz SPI clock
 - **Pin Configuration**: Typical pins include CS, interrupt, reset, cfg0, cfg1
 
+## External Dependencies
+
+### arduino-pico (earlephilhower/arduino-pico)
+
+This project depends on the lwIP implementation from the arduino-pico core. The repository is cloned alongside this project at:
+- **Location**: `/data/data/com.termux/files/home/arduino-pico`
+- **Repository**: https://github.com/earlephilhower/arduino-pico
+
+#### Key lwIP Files Referenced
+
+| File | Path | Purpose |
+|------|------|---------|
+| `LwipIntfDev.h` | `libraries/lwIP_Ethernet/src/` | Template class that `ADIN2111_wrap` extends |
+| `LwipEthernet.h/cpp` | `libraries/lwIP_Ethernet/src/` | Ethernet implementation |
+| `LwipIntf.h/cpp` | `libraries/lwIP_Ethernet/src/` | Base lwIP interface |
+| `LwipIntfCB.cpp` | `libraries/lwIP_Ethernet/src/` | Callback handling |
+| `EthernetCompat.h` | `libraries/lwIP_Ethernet/src/` | Compatibility layer |
+
+#### How This Project Uses arduino-pico
+
+- `src/adin2111_lwip.h` includes `LwipIntfDev.h` and `LwipEthernet.h`
+- The public API `ADIN2111_lwIP` is defined as `LwipIntfDev<ADIN2111_wrap>`
+- Board definitions (RP2040, Pico) use macros like `ARDUINO_RASPBERRY_PI_PICO`
+
+When modifying lwIP integration, cross-reference the arduino-pico implementation to ensure compatibility with the template interface.
+
 ## Common Workflows
 
 ### Adding New ADIN2111 Features
