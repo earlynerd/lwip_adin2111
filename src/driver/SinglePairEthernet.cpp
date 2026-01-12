@@ -109,12 +109,15 @@ void SinglePairEthernet::rxCallback(void *pCBParam, uint32_t Event, void *pArg)
 
 void SinglePairEthernet::linkCallback(void *pCBParam, uint32_t Event, void *pArg)
 {
-    linkStatus = *(adi_eth_LinkStatus_e *)pArg;
+    // For ADIN2111, pArg is adi_mac_StatusRegisters_t*, not adi_eth_LinkStatus_e*
+    // Query actual link status from PHYs - link is up if either port has link
+    bool isUp = getLinkStatus();
+    linkStatus = isUp ? ADI_ETH_LINK_STATUS_UP : ADI_ETH_LINK_STATUS_DOWN;
+
     // call user callback
     if (userLinkCallback)
     {
-
-        userLinkCallback(linkStatus == ADI_ETH_LINK_STATUS_UP);
+        userLinkCallback(isUp);
     }
 }
 

@@ -186,6 +186,21 @@ adi_eth_Result_e adin2111_Init(adin2111_DeviceHandle_t hDevice, adin2111_DriverC
         goto end;
     }
 
+    /* Enable link status change interrupt in PHY subsystem for both ports */
+    /* PHY init writes 0 to PHY_SUBSYS_IRQ_MASK, so we need to enable it here */
+    result = macDriverEntry.PhyWrite(hDevice->pMacDevice, phyDrvConfig[ADIN2111_PORT_1].addr,
+                                     ADDR_PHY_SUBSYS_IRQ_MASK, BITM_PHY_SUBSYS_IRQ_MASK_LINK_STAT_CHNG_IRQ_EN);
+    if (result != ADI_ETH_SUCCESS)
+    {
+        goto end;
+    }
+    result = macDriverEntry.PhyWrite(hDevice->pMacDevice, phyDrvConfig[ADIN2111_PORT_2].addr,
+                                     ADDR_PHY_SUBSYS_IRQ_MASK, BITM_PHY_SUBSYS_IRQ_MASK_LINK_STAT_CHNG_IRQ_EN);
+    if (result != ADI_ETH_SUCCESS)
+    {
+        goto end;
+    }
+
     /* Now enable the PHY interrupt sources in the MAC status registers */
     hDevice->pMacDevice->irqMask0 &= ~BITM_MAC_IMASK0_PHYINTM;
     result = adin2111_WriteRegister(hDevice, ADDR_MAC_IMASK0, hDevice->pMacDevice->irqMask0);
@@ -202,7 +217,9 @@ adi_eth_Result_e adin2111_Init(adin2111_DeviceHandle_t hDevice, adin2111_DriverC
     }
 
     /* Default mask for PHY interrupts set by the PHY init function */
-    hDevice->pMacDevice->phyIrqMask = ADI_PHY_CRSM_HW_ERROR | BITM_CRSM_IRQ_MASK_CRSM_HRD_RST_IRQ_EN;
+    /* Include link status change so the ADI_MAC_EVT_LINK_CHANGE callback can fire */
+    hDevice->pMacDevice->phyIrqMask = ADI_PHY_CRSM_HW_ERROR | BITM_CRSM_IRQ_MASK_CRSM_HRD_RST_IRQ_EN |
+                                      (BITM_PHY_SUBSYS_IRQ_MASK_LINK_STAT_CHNG_IRQ_EN << 16);
 
     /* Configure pins for TS_TIMER and TS_CAPT capability */
     configureTsPins(hDevice);
