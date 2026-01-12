@@ -18,7 +18,7 @@ struct ADIN2111Config {
     // Cut-through mode configuration
     bool cutThroughTx = false;       // TX cut-through mode
     bool cutThroughRx = false;       // RX cut-through mode
-    bool cutThroughP2P = false;      // Port-to-port cut-through mode
+    bool cutThroughP2P = true;      // Port-to-port cut-through mode
 
     // Initialization configuration
     uint8_t initRetries = 5;         // Number of initialization attempts
