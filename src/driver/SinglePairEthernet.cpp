@@ -126,6 +126,8 @@ void SinglePairEthernet::setSPI(SPIClass &spi)
 bool SinglePairEthernet::begin(uint8_t *retries, const uint8_t *mac, uint8_t cs, uint8_t intr, uint8_t reset, uint8_t cfg0, uint8_t cfg1)
 {
     adi_eth_Result_e result = ADI_ETH_SUCCESS;
+    // Initialize cached link status to DOWN before callbacks are registered
+    linkStatus = ADI_ETH_LINK_STATUS_DOWN;
     if (mac)
     {
         memcpy(macAddr, mac, 6);
@@ -507,7 +509,10 @@ bool SinglePairEthernet::getLinkStatus(void)
 
 bool SinglePairEthernet::isLinkUp(void)
 {
-    return getLinkStatus();
+    // Use cached link status from interrupt callback (no SPI transaction)
+    // This prevents link flapping from PHY read inconsistencies which
+    // would cause lwIP to repeatedly restart DHCP
+    return (linkStatus == ADI_ETH_LINK_STATUS_UP);
 }
 
 // Wrapper methods merged from sfe_spe_advanced
